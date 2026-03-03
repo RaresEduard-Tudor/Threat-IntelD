@@ -15,6 +15,7 @@ _MOCK_DA = {"days_registered": 1000, "risk_level": "Low", "details": "Establishe
 _MOCK_SSL = {"valid": True, "issuer": "Test CA", "expires_in_days": 90, "details": "Valid SSL."}
 _MOCK_VT = {"detected": False, "malicious": 0, "suspicious": 0, "total": 84, "details": "No threats detected (84 engines checked)."}
 _MOCK_IP = {"ip": "93.184.216.34", "abuse_confidence_score": 0, "is_flagged": False, "country_code": "US", "total_reports": 0, "details": "No abuse reports."}
+_MOCK_HEU = {"is_suspicious": False, "flag_count": 0, "flags": [], "risk_score": 0, "details": "No suspicious URL patterns detected."}
 
 
 # ---------------------------------------------------------------------------
@@ -38,6 +39,7 @@ class TestAnalyze:
              patch("app.main.check_ssl_certificate", new_callable=AsyncMock, return_value=_MOCK_SSL), \
              patch("app.main.check_virustotal", new_callable=AsyncMock, return_value=_MOCK_VT), \
              patch("app.main.check_ip_reputation", new_callable=AsyncMock, return_value=_MOCK_IP), \
+             patch("app.main.check_url_heuristics", new_callable=AsyncMock, return_value=_MOCK_HEU), \
              patch("app.main._save_scan", new_callable=AsyncMock):
             response = client.post("/analyze", json={"url": "https://example.com"})
 
@@ -51,6 +53,7 @@ class TestAnalyze:
         assert "ssl_certificate" in data["checks"]
         assert "virustotal" in data["checks"]
         assert "ip_reputation" in data["checks"]
+        assert "url_heuristics" in data["checks"]
         assert "target_url" in data
         assert "timestamp" in data
 
@@ -66,6 +69,7 @@ class TestAnalyze:
              patch("app.main.check_ssl_certificate", new_callable=AsyncMock, return_value=ssl_r), \
              patch("app.main.check_virustotal", new_callable=AsyncMock, return_value=vt), \
              patch("app.main.check_ip_reputation", new_callable=AsyncMock, return_value=ip_flagged), \
+             patch("app.main.check_url_heuristics", new_callable=AsyncMock, return_value=_MOCK_HEU), \
              patch("app.main._save_scan", new_callable=AsyncMock):
             response = client.post("/analyze", json={"url": "https://evil.example.com"})
 
@@ -81,6 +85,7 @@ class TestAnalyze:
              patch("app.main.check_ssl_certificate", new_callable=AsyncMock, return_value=ssl_expiring), \
              patch("app.main.check_virustotal", new_callable=AsyncMock, return_value=_MOCK_VT), \
              patch("app.main.check_ip_reputation", new_callable=AsyncMock, return_value=_MOCK_IP), \
+             patch("app.main.check_url_heuristics", new_callable=AsyncMock, return_value=_MOCK_HEU), \
              patch("app.main._save_scan", new_callable=AsyncMock):
             response = client.post("/analyze", json={"url": "https://expiring.example.com"})
 
@@ -135,6 +140,7 @@ class TestCaching:
              patch("app.main.check_ssl_certificate", new_callable=AsyncMock, return_value=_MOCK_SSL), \
              patch("app.main.check_virustotal", new_callable=AsyncMock, return_value=_MOCK_VT), \
              patch("app.main.check_ip_reputation", new_callable=AsyncMock, return_value=_MOCK_IP), \
+             patch("app.main.check_url_heuristics", new_callable=AsyncMock, return_value=_MOCK_HEU), \
              patch("app.main._save_scan", new_callable=AsyncMock):
             r1 = client.post("/analyze", json={"url": "https://cache-test.example.com"})
             r2 = client.post("/analyze", json={"url": "https://cache-test.example.com"})
@@ -152,6 +158,7 @@ class TestCaching:
              patch("app.main.check_ssl_certificate", new_callable=AsyncMock, return_value=_MOCK_SSL), \
              patch("app.main.check_virustotal", new_callable=AsyncMock, return_value=_MOCK_VT), \
              patch("app.main.check_ip_reputation", new_callable=AsyncMock, return_value=_MOCK_IP), \
+             patch("app.main.check_url_heuristics", new_callable=AsyncMock, return_value=_MOCK_HEU), \
              patch("app.main._save_scan", new_callable=AsyncMock):
             client.post("/analyze", json={"url": "https://url-a.example.com"})
             client.post("/analyze", json={"url": "https://url-b.example.com"})
@@ -197,6 +204,38 @@ class TestHistory:
 # ---------------------------------------------------------------------------
 # /report/{id}
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# /trending
+# ---------------------------------------------------------------------------
+class TestTrending:
+    _ENTRIES = [
+        {"id": 3, "url": "https://evil.com", "threat_score": 90, "assessment": "Malicious", "timestamp": "2026-04-01T12:00:00Z"},
+        {"id": 2, "url": "https://sketchy.net", "threat_score": 55, "assessment": "Suspicious", "timestamp": "2026-04-01T11:00:00Z"},
+    ]
+
+    def test_returns_list(self):
+        with patch("app.main._load_trending", new_callable=AsyncMock, return_value=self._ENTRIES):
+            response = client.get("/trending")
+        assert response.status_code == 200
+        assert len(response.json()) == 2
+
+    def test_returns_empty_list(self):
+        with patch("app.main._load_trending", new_callable=AsyncMock, return_value=[]):
+            response = client.get("/trending")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_entry_has_required_fields(self):
+        with patch("app.main._load_trending", new_callable=AsyncMock, return_value=self._ENTRIES):
+            response = client.get("/trending")
+        entry = response.json()[0]
+        for field in ("id", "url", "threat_score", "assessment", "timestamp"):
+            assert field in entry
+
+
+# ---------------------------------------------------------------------------
+# /report/{id}
+# ---------------------------------------------------------------------------
 class TestReport:
     _FULL_CHECKS = {
         "safe_browsing": _MOCK_SB,
@@ -204,6 +243,7 @@ class TestReport:
         "ssl_certificate": _MOCK_SSL,
         "virustotal": _MOCK_VT,
         "ip_reputation": _MOCK_IP,
+        "url_heuristics": _MOCK_HEU,
     }
     _STORED_ROW = {
         "id": 42,

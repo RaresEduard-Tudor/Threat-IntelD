@@ -6,6 +6,8 @@ import { fetchReport } from './api/report';
 import UrlForm from './components/UrlForm';
 import ResultsDashboard from './components/ResultsDashboard';
 import HistoryPanel from './components/HistoryPanel';
+import TrendingFeed from './components/TrendingFeed';
+import { fetchTrending } from './api/trending';
 
 export default function App() {
   const [loading, setLoading] = useState(false);
@@ -14,6 +16,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
+  const [trending, setTrending] = useState<HistoryEntry[]>([]);
+  const [trendingLoading, setTrendingLoading] = useState(true);
 
   async function loadHistory() {
     const entries = await fetchHistory();
@@ -23,6 +27,7 @@ export default function App() {
 
   useEffect(() => {
     loadHistory();
+    fetchTrending().then((e) => { setTrending(e); setTrendingLoading(false); });
     // Load a shared report if ?id= is present in the URL
     const params = new URLSearchParams(window.location.search);
     const id = params.get('id');
@@ -52,6 +57,8 @@ export default function App() {
       const entries = await fetchHistory();
       setHistory(entries);
       setHistoryLoading(false);
+      // Refresh trending feed after a new scan
+      fetchTrending().then((e) => { setTrending(e); setTrendingLoading(false); });
       // Pick up the id of the scan we just saved (it will be the newest entry)
       if (entries.length > 0 && entries[0].url === result.target_url) {
         setReportId(entries[0].id);
@@ -98,6 +105,12 @@ export default function App() {
       <HistoryPanel
         entries={history}
         loading={historyLoading}
+        onSelect={handleSubmit}
+      />
+
+      <TrendingFeed
+        entries={trending}
+        loading={trendingLoading}
         onSelect={handleSubmit}
       />
 

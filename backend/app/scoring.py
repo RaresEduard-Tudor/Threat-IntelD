@@ -7,6 +7,7 @@
 # virustotal detected          → +40 points
 # virustotal suspicious (>2)   → +15 points (only when not detected)
 # ip_reputation flagged        → +25 points
+# url_heuristics flag_count≥1  → +5 pts; ≥3 → +10 pts; ≥5 → +20 pts
 
 def compute_score(
     safe_browsing: dict,
@@ -14,6 +15,7 @@ def compute_score(
     ssl: dict,
     virustotal: dict | None = None,
     ip_reputation: dict | None = None,
+    url_heuristics: dict | None = None,
 ) -> tuple[int, str]:
     score = 0
 
@@ -41,6 +43,15 @@ def compute_score(
 
     if ip_reputation is not None and ip_reputation.get("is_flagged"):
         score += 25
+
+    if url_heuristics is not None:
+        flag_count = url_heuristics.get("flag_count", 0)
+        if flag_count >= 5:
+            score += 20
+        elif flag_count >= 3:
+            score += 10
+        elif flag_count >= 1:
+            score += 5
 
     score = min(score, 100)
 

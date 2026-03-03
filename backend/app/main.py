@@ -24,6 +24,7 @@ from .checks.domain_age import check_domain_age
 from .checks.ssl_certificate import check_ssl_certificate
 from .checks.virustotal import check_virustotal
 from .checks.ip_reputation import check_ip_reputation
+from .checks.url_heuristics import check_url_heuristics
 from .database import AsyncSessionLocal, init_db
 from .models import ScanResult
 from .scoring import compute_score
@@ -127,8 +128,8 @@ class AnalyzeRequest(BaseModel):
 _CHECK_TIMEOUT = 12.0  # seconds per individual check
 
 
-async def _run_checks(url: str) -> tuple[dict, dict, dict, dict, dict]:
-    """Run all five checks concurrently, each capped by an individual timeout."""
+async def _run_checks(url: str) -> tuple[dict, dict, dict, dict, dict, dict]:
+    """Run all six checks concurrently, each capped by an individual timeout."""
 
     async def _timed(coro, fallback: dict) -> dict:
         try:
@@ -156,6 +157,10 @@ async def _run_checks(url: str) -> tuple[dict, dict, dict, dict, dict]:
         _timed(
             check_ip_reputation(url),
             {"ip": None, "abuse_confidence_score": 0, "is_flagged": False, "country_code": None, "total_reports": 0, "details": "IP reputation check timed out."},
+        ),
+        _timed(
+            check_url_heuristics(url),
+            {"is_suspicious": False, "flag_count": 0, "flags": [], "risk_score": 0, "details": "URL heuristics check timed out."},
         ),
     )
 
@@ -224,6 +229,31 @@ async def _load_report(report_id: int) -> dict | None:
     }
 
 
+async def _load_trending(limit: int = 20) -> list[dict]:
+    """Return the most recent malicious or suspicious scans, newest first."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ScanResult)
+                .where(ScanResult.assessment.in_(["Malicious", "Suspicious"]))
+                .order_by(ScanResult.id.desc())
+                .limit(limit)
+            )
+            rows = result.scalars().all()
+        return [
+            {
+                "id": r.id,
+                "url": r.url,
+                "threat_score": r.threat_score,
+                "assessment": r.assessment,
+                "timestamp": r.timestamp,
+            }
+            for r in rows
+        ]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -235,6 +265,12 @@ async def health():
 @app.get("/history")
 async def get_history():
     return await _load_history()
+
+
+@app.get("/trending")
+async def get_trending():
+    """Return the most recent malicious/suspicious scans for the public feed."""
+    return await _load_trending()
 
 
 @app.get("/report/{report_id}")
@@ -261,9 +297,9 @@ async def analyze(request: Request, body: AnalyzeRequest):
     if cache_key in _cache:
         return _cache[cache_key]
 
-    safe_browsing_result, domain_age_result, ssl_result, virustotal_result, ip_reputation_result = await _run_checks(target)
+    safe_browsing_result, domain_age_result, ssl_result, virustotal_result, ip_reputation_result, url_heuristics_result = await _run_checks(target)
     threat_score, assessment = compute_score(
-        safe_browsing_result, domain_age_result, ssl_result, virustotal_result, ip_reputation_result
+        safe_browsing_result, domain_age_result, ssl_result, virustotal_result, ip_reputation_result, url_heuristics_result
     )
 
     result = {
@@ -277,6 +313,7 @@ async def analyze(request: Request, body: AnalyzeRequest):
             "ssl_certificate": ssl_result,
             "virustotal": virustotal_result,
             "ip_reputation": ip_reputation_result,
+            "url_heuristics": url_heuristics_result,
         },
     }
 

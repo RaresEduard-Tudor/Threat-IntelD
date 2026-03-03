@@ -3,6 +3,7 @@ import type { ThreatReport } from '../types/threat';
 import AssessmentBadge from './AssessmentBadge';
 import ThreatScoreDonut from './ThreatScoreDonut';
 import CheckCard from './CheckCard';
+import { exportJson, exportHtml } from '../utils/exportReport';
 
 interface Props {
   report: ThreatReport;
@@ -53,6 +54,20 @@ export default function ResultsDashboard({ report, reportId }: Props) {
               {copied ? '✅ Link copied!' : '🔗 Copy shareable link'}
             </button>
           )}
+          <div className="flex gap-2 mt-1">
+            <button
+              onClick={() => exportJson(report)}
+              className="text-xs text-gray-400 hover:text-gray-200 border border-gray-700 rounded px-2 py-1 transition-colors"
+            >
+              ⬇ JSON
+            </button>
+            <button
+              onClick={() => exportHtml(report)}
+              className="text-xs text-gray-400 hover:text-gray-200 border border-gray-700 rounded px-2 py-1 transition-colors"
+            >
+              🖨 HTML
+            </button>
+          </div>
         </div>
       </div>
 
@@ -123,6 +138,16 @@ export default function ResultsDashboard({ report, reportId }: Props) {
             { label: 'IP Address', value: checks.ip_reputation.ip },
             { label: 'Abuse Score', value: checks.ip_reputation.abuse_confidence_score !== null ? `${checks.ip_reputation.abuse_confidence_score}/100` : null },
             { label: 'Country', value: checks.ip_reputation.country_code },
+          ]}
+        />
+        <CheckCard
+          title="URL Heuristics"
+          icon="🔍"
+          passed={!checks.url_heuristics.is_suspicious}
+          details={checks.url_heuristics.details}
+          meta={[
+            { label: 'Flags', value: checks.url_heuristics.flag_count > 0 ? checks.url_heuristics.flags.join(', ') : 'None' },
+            { label: 'Risk Score', value: `${checks.url_heuristics.risk_score}/5` },
           ]}
         />
       </div>

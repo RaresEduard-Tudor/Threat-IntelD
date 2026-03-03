@@ -14,6 +14,7 @@ const baseReport: ThreatReport = {
     ssl_certificate: { valid: true, issuer: 'Let\'s Encrypt', expires_in_days: 60, details: 'Certificate is valid.' },
     virustotal: { detected: false, malicious: 0, suspicious: 0, total: 84, details: 'No threats detected (84 engines checked).' },
     ip_reputation: { ip: '93.184.216.34', abuse_confidence_score: 0, is_flagged: false, country_code: 'US', total_reports: 0, details: 'No abuse reports.' },
+    url_heuristics: { is_suspicious: false, flag_count: 0, flags: [], risk_score: 0, details: 'No suspicious URL patterns detected.' },
   },
 };
 
@@ -35,6 +36,7 @@ describe('ResultsDashboard', () => {
     expect(screen.getByText('SSL Certificate')).toBeInTheDocument();
     expect(screen.getByText('VirusTotal')).toBeInTheDocument();
     expect(screen.getByText('IP Reputation')).toBeInTheDocument();
+    expect(screen.getByText('URL Heuristics')).toBeInTheDocument();
   });
 
   it('shows domain days registered', () => {

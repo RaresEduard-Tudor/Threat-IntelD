@@ -34,12 +34,21 @@ export interface IpReputationResult {
   details: string;
 }
 
+export interface UrlHeuristicsResult {
+  is_suspicious: boolean;
+  flag_count: number;
+  flags: string[];
+  risk_score: number;
+  details: string;
+}
+
 export interface ThreatChecks {
   safe_browsing: SafeBrowsingResult;
   domain_age: DomainAgeResult;
   ssl_certificate: SSLResult;
   virustotal: VirusTotalResult;
   ip_reputation: IpReputationResult;
+  url_heuristics: UrlHeuristicsResult;
 }
 
 export type Assessment = 'Safe' | 'Suspicious' | 'Malicious';

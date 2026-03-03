@@ -151,3 +151,31 @@ class TestComputeScore:
         # passing None (default) must not affect score
         score, _ = compute_score(_sb(), _da(), _ssl(), None)
         assert score == 0
+
+
+def _heu(flag_count: int = 0, is_suspicious: bool = False) -> dict:
+    return {
+        "is_suspicious": is_suspicious,
+        "flag_count": flag_count,
+        "flags": [f"flag-{i}" for i in range(flag_count)],
+        "risk_score": min(flag_count, 5),
+        "details": "",
+    }
+
+
+class TestUrlHeuristicsScoring:
+    def test_one_flag_adds_5(self):
+        score, _ = compute_score(_sb(), _da(), _ssl(), url_heuristics=_heu(1, True))
+        assert score == 5
+
+    def test_three_flags_adds_10(self):
+        score, _ = compute_score(_sb(), _da(), _ssl(), url_heuristics=_heu(3, True))
+        assert score == 10
+
+    def test_five_flags_adds_20(self):
+        score, _ = compute_score(_sb(), _da(), _ssl(), url_heuristics=_heu(5, True))
+        assert score == 20
+
+    def test_none_does_not_affect_score(self):
+        score, _ = compute_score(_sb(), _da(), _ssl(), url_heuristics=None)
+        assert score == 0
