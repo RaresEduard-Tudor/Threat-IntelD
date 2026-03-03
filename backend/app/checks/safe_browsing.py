@@ -1,12 +1,12 @@
 import httpx
 import os
 
-SAFE_BROWSING_API_KEY = os.getenv("GOOGLE_SAFE_BROWSING_API_KEY", "")
 SAFE_BROWSING_URL = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
 
 
 async def check_safe_browsing(url: str) -> dict:
     """Call the Google Safe Browsing API to check for known threats."""
+    SAFE_BROWSING_API_KEY = os.getenv("GOOGLE_SAFE_BROWSING_API_KEY", "")
     if not SAFE_BROWSING_API_KEY:
         return {
             "flagged": False,

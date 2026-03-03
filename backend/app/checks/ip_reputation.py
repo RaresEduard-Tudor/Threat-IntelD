@@ -4,7 +4,6 @@ from urllib.parse import urlparse
 
 import httpx
 
-_ABUSEIPDB_API_KEY = os.getenv("ABUSEIPDB_API_KEY", "")
 _ABUSEIPDB_URL = "https://api.abuseipdb.com/api/v2/check"
 
 
@@ -41,6 +40,7 @@ async def check_ip_reputation(url: str) -> dict:
             "details": f"Could not resolve hostname: {hostname}",
         }
 
+    _ABUSEIPDB_API_KEY = os.getenv("ABUSEIPDB_API_KEY", "")
     if not _ABUSEIPDB_API_KEY:
         return {
             "ip": ip,

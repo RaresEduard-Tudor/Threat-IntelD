@@ -3,7 +3,6 @@ import os
 
 import httpx
 
-_VT_API_KEY = os.getenv("VIRUSTOTAL_API_KEY", "")
 _VT_URL_REPORT = "https://www.virustotal.com/api/v3/urls/{}"
 
 
@@ -19,6 +18,7 @@ async def check_virustotal(url: str) -> dict:
 
     If VIRUSTOTAL_API_KEY is not set the check is skipped and detected is False.
     """
+    _VT_API_KEY = os.getenv("VIRUSTOTAL_API_KEY", "")
     if not _VT_API_KEY:
         return {
             "detected": False,

@@ -19,6 +19,8 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sqlalchemy import select
 
+load_dotenv()  # must run before importing check modules that read env vars
+
 from .checks.safe_browsing import check_safe_browsing
 from .checks.domain_age import check_domain_age
 from .checks.ssl_certificate import check_ssl_certificate
