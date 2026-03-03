@@ -17,6 +17,7 @@ _MOCK_VT = {"detected": False, "malicious": 0, "suspicious": 0, "total": 84, "de
 _MOCK_IP = {"ip": "93.184.216.34", "abuse_confidence_score": 0, "is_flagged": False, "country_code": "US", "total_reports": 0, "details": "No abuse reports."}
 _MOCK_HEU = {"is_suspicious": False, "flag_count": 0, "flags": [], "risk_score": 0, "details": "No suspicious URL patterns detected."}
 _MOCK_SS = {"available": False, "image_b64": None, "details": "Screenshot unavailable."}
+_MOCK_UH = {"flagged": False, "threat_type": None, "query_status": "no_results", "details": "Not found in URLhaus database."}
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +42,7 @@ class TestAnalyze:
              patch("app.main.check_virustotal", new_callable=AsyncMock, return_value=_MOCK_VT), \
              patch("app.main.check_ip_reputation", new_callable=AsyncMock, return_value=_MOCK_IP), \
              patch("app.main.check_url_heuristics", new_callable=AsyncMock, return_value=_MOCK_HEU), \
+             patch("app.main.check_urlhaus", new_callable=AsyncMock, return_value=_MOCK_UH), \
              patch("app.main.take_screenshot", new_callable=AsyncMock, return_value=_MOCK_SS), \
              patch("app.main._save_scan", new_callable=AsyncMock):
             response = client.post("/analyze", json={"url": "https://example.com"})
@@ -72,6 +74,7 @@ class TestAnalyze:
              patch("app.main.check_virustotal", new_callable=AsyncMock, return_value=vt), \
              patch("app.main.check_ip_reputation", new_callable=AsyncMock, return_value=ip_flagged), \
              patch("app.main.check_url_heuristics", new_callable=AsyncMock, return_value=_MOCK_HEU), \
+             patch("app.main.check_urlhaus", new_callable=AsyncMock, return_value=_MOCK_UH), \
              patch("app.main.take_screenshot", new_callable=AsyncMock, return_value=_MOCK_SS), \
              patch("app.main._save_scan", new_callable=AsyncMock):
             response = client.post("/analyze", json={"url": "https://evil.example.com"})
@@ -89,6 +92,7 @@ class TestAnalyze:
              patch("app.main.check_virustotal", new_callable=AsyncMock, return_value=_MOCK_VT), \
              patch("app.main.check_ip_reputation", new_callable=AsyncMock, return_value=_MOCK_IP), \
              patch("app.main.check_url_heuristics", new_callable=AsyncMock, return_value=_MOCK_HEU), \
+             patch("app.main.check_urlhaus", new_callable=AsyncMock, return_value=_MOCK_UH), \
              patch("app.main.take_screenshot", new_callable=AsyncMock, return_value=_MOCK_SS), \
              patch("app.main._save_scan", new_callable=AsyncMock):
             response = client.post("/analyze", json={"url": "https://expiring.example.com"})
@@ -145,6 +149,7 @@ class TestCaching:
              patch("app.main.check_virustotal", new_callable=AsyncMock, return_value=_MOCK_VT), \
              patch("app.main.check_ip_reputation", new_callable=AsyncMock, return_value=_MOCK_IP), \
              patch("app.main.check_url_heuristics", new_callable=AsyncMock, return_value=_MOCK_HEU), \
+             patch("app.main.check_urlhaus", new_callable=AsyncMock, return_value=_MOCK_UH), \
              patch("app.main.take_screenshot", new_callable=AsyncMock, return_value=_MOCK_SS), \
              patch("app.main._save_scan", new_callable=AsyncMock):
             r1 = client.post("/analyze", json={"url": "https://cache-test.example.com"})
@@ -164,6 +169,7 @@ class TestCaching:
              patch("app.main.check_virustotal", new_callable=AsyncMock, return_value=_MOCK_VT), \
              patch("app.main.check_ip_reputation", new_callable=AsyncMock, return_value=_MOCK_IP), \
              patch("app.main.check_url_heuristics", new_callable=AsyncMock, return_value=_MOCK_HEU), \
+             patch("app.main.check_urlhaus", new_callable=AsyncMock, return_value=_MOCK_UH), \
              patch("app.main.take_screenshot", new_callable=AsyncMock, return_value=_MOCK_SS), \
              patch("app.main._save_scan", new_callable=AsyncMock):
             client.post("/analyze", json={"url": "https://url-a.example.com"})

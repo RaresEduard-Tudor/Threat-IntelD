@@ -42,6 +42,13 @@ export interface UrlHeuristicsResult {
   details: string;
 }
 
+export interface UrlHausResult {
+  flagged: boolean;
+  threat_type: string | null;
+  query_status: string;
+  details: string;
+}
+
 export interface ScreenshotResult {
   available: boolean;
   image_b64: string | null;
@@ -55,6 +62,7 @@ export interface ThreatChecks {
   virustotal: VirusTotalResult;
   ip_reputation: IpReputationResult;
   url_heuristics: UrlHeuristicsResult;
+  urlhaus: UrlHausResult;
 }
 
 export type Assessment = 'Safe' | 'Suspicious' | 'Malicious';
