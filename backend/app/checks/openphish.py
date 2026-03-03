@@ -4,7 +4,10 @@ from urllib.parse import urlparse, urlunparse
 
 import httpx
 
-_FEED_URL = "https://openphish.com/feed.txt"
+# Official public mirror — the openphish.com/feed.txt endpoint requires a paid
+# subscription and blocks automated requests.  The repo below is the authoritative
+# community feed maintained by the OpenPhish project itself.
+_FEED_URL = "https://raw.githubusercontent.com/openphish/public_feed/main/feed.txt"
 _FEED_TTL = 6 * 3600  # refresh every 6 hours
 
 _feed: set[str] = set()
