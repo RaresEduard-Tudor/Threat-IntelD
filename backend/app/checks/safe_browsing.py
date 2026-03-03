@@ -39,11 +39,12 @@ async def check_safe_browsing(url: str) -> dict:
             response.raise_for_status()
             data = response.json()
     except httpx.HTTPStatusError as e:
-        return {
-            "flagged": False,
-            "threat_type": None,
-            "details": f"Safe Browsing API error: {e.response.status_code}",
-        }
+        code = e.response.status_code
+        if code == 403:
+            detail = "Safe Browsing check failed: API not enabled — go to Google Cloud Console and enable the Safe Browsing API for this key."
+        else:
+            detail = f"Safe Browsing API error: {code}"
+        return {"flagged": False, "threat_type": None, "details": detail}
     except Exception as e:
         return {
             "flagged": False,

@@ -22,7 +22,7 @@ async def check_urlhaus(url: str) -> dict:
             response = await client.post(
                 _URLHAUS_API,
                 data={"url": url},
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                headers={"Accept": "application/json"},
             )
             response.raise_for_status()
             data = response.json()
