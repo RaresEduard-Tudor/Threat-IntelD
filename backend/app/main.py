@@ -25,6 +25,7 @@ from .checks.ssl_certificate import check_ssl_certificate
 from .checks.virustotal import check_virustotal
 from .checks.ip_reputation import check_ip_reputation
 from .checks.url_heuristics import check_url_heuristics
+from .checks.screenshot import take_screenshot
 from .database import AsyncSessionLocal, init_db
 from .models import ScanResult
 from .scoring import compute_score
@@ -125,7 +126,16 @@ class AnalyzeRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Concurrent checks with per-task timeout
 # ---------------------------------------------------------------------------
-_CHECK_TIMEOUT = 12.0  # seconds per individual check
+_CHECK_TIMEOUT = 12.0     # seconds per individual check
+_SCREENSHOT_TIMEOUT = 15.0  # screenshot can be slower
+
+
+async def _take_screenshot_safe(url: str) -> dict:
+    """Run take_screenshot with a hard timeout; return a failure dict on timeout."""
+    try:
+        return await asyncio.wait_for(take_screenshot(url), timeout=_SCREENSHOT_TIMEOUT)
+    except asyncio.TimeoutError:
+        return {"available": False, "image_b64": None, "details": "Screenshot timed out."}
 
 
 async def _run_checks(url: str) -> tuple[dict, dict, dict, dict, dict, dict]:
@@ -295,14 +305,26 @@ async def analyze(request: Request, body: AnalyzeRequest):
 
     cache_key = hashlib.sha256(target.encode()).hexdigest()
     if cache_key in _cache:
-        return _cache[cache_key]
+        screenshot = await _take_screenshot_safe(target)
+        return {**_cache[cache_key], "screenshot": screenshot}
 
-    safe_browsing_result, domain_age_result, ssl_result, virustotal_result, ip_reputation_result, url_heuristics_result = await _run_checks(target)
+    (
+        safe_browsing_result,
+        domain_age_result,
+        ssl_result,
+        virustotal_result,
+        ip_reputation_result,
+        url_heuristics_result,
+    ), screenshot = await asyncio.gather(
+        _run_checks(target),
+        _take_screenshot_safe(target),
+    )
+
     threat_score, assessment = compute_score(
         safe_browsing_result, domain_age_result, ssl_result, virustotal_result, ip_reputation_result, url_heuristics_result
     )
 
-    result = {
+    cacheable = {
         "target_url": target,
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "threat_score": threat_score,
@@ -317,7 +339,7 @@ async def analyze(request: Request, body: AnalyzeRequest):
         },
     }
 
-    _cache[cache_key] = result
-    await _save_scan(result)
-    return result
+    _cache[cache_key] = cacheable
+    await _save_scan(cacheable)
+    return {**cacheable, "screenshot": screenshot}
 

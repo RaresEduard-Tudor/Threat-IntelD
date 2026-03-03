@@ -8,6 +8,7 @@ pyOpenSSL>=24.1.0
 python-dotenv>=1.0.1
 pydantic>=2.9.0
 slowapi>=0.1.9
+playwright>=1.40.0
 cachetools>=5.3.3
 sqlalchemy[asyncio]>=2.0.0
 aiosqlite>=0.20.0

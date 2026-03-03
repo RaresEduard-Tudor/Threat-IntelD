@@ -42,6 +42,12 @@ export interface UrlHeuristicsResult {
   details: string;
 }
 
+export interface ScreenshotResult {
+  available: boolean;
+  image_b64: string | null;
+  details: string;
+}
+
 export interface ThreatChecks {
   safe_browsing: SafeBrowsingResult;
   domain_age: DomainAgeResult;
@@ -59,6 +65,7 @@ export interface ThreatReport {
   threat_score: number;
   assessment: Assessment;
   checks: ThreatChecks;
+  screenshot?: ScreenshotResult;
 }
 
 export interface HistoryEntry {

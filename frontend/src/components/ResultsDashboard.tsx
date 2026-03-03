@@ -71,6 +71,21 @@ export default function ResultsDashboard({ report, reportId }: Props) {
         </div>
       </div>
 
+      {/* Screenshot Preview */}
+      {report.screenshot?.available && report.screenshot.image_b64 && (
+        <div className="rounded-2xl border border-gray-800 bg-gray-900 p-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            Page Preview
+          </p>
+          <img
+            src={`data:image/jpeg;base64,${report.screenshot.image_b64}`}
+            alt="Page screenshot"
+            className="w-full rounded-lg object-cover max-h-64"
+          />
+          <p className="mt-2 text-xs text-gray-600">{report.screenshot.details}</p>
+        </div>
+      )}
+
       {/* Check breakdowns */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <CheckCard
