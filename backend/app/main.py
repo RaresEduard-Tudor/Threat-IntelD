@@ -341,7 +341,15 @@ async def analyze(request: Request, body: AnalyzeRequest):
         },
     }
 
-    _cache[cache_key] = cacheable
+    # Only cache results where every check actually ran (no skipped/unconfigured
+    # checks).  This prevents a stale "skipped" response from being served after
+    # an API key is added and the server is restarted.
+    _any_skipped = any(
+        "skipped" in (v.get("details", "") or "").lower()
+        for v in cacheable["checks"].values()
+    )
+    if not _any_skipped:
+        _cache[cache_key] = cacheable
     await _save_scan(cacheable)
     return {**cacheable, "screenshot": screenshot}
 
