@@ -13,6 +13,7 @@ const baseReport: ThreatReport = {
     domain_age: { days_registered: 365, risk_level: 'Low', details: 'Domain is 365 days old.' },
     ssl_certificate: { valid: true, issuer: 'Let\'s Encrypt', expires_in_days: 60, details: 'Certificate is valid.' },
     virustotal: { detected: false, malicious: 0, suspicious: 0, total: 84, details: 'No threats detected (84 engines checked).' },
+    ip_reputation: { ip: '93.184.216.34', abuse_confidence_score: 0, is_flagged: false, country_code: 'US', total_reports: 0, details: 'No abuse reports.' },
   },
 };
 
@@ -27,12 +28,13 @@ describe('ResultsDashboard', () => {
     expect(screen.getByText('0')).toBeInTheDocument();
   });
 
-  it('renders all four check card titles', () => {
+  it('renders all five check card titles', () => {
     render(<ResultsDashboard report={baseReport} />);
     expect(screen.getByText('Google Safe Browsing')).toBeInTheDocument();
     expect(screen.getByText('Domain Age')).toBeInTheDocument();
     expect(screen.getByText('SSL Certificate')).toBeInTheDocument();
     expect(screen.getByText('VirusTotal')).toBeInTheDocument();
+    expect(screen.getByText('IP Reputation')).toBeInTheDocument();
   });
 
   it('shows domain days registered', () => {

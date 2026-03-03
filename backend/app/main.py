@@ -23,6 +23,7 @@ from .checks.safe_browsing import check_safe_browsing
 from .checks.domain_age import check_domain_age
 from .checks.ssl_certificate import check_ssl_certificate
 from .checks.virustotal import check_virustotal
+from .checks.ip_reputation import check_ip_reputation
 from .database import AsyncSessionLocal, init_db
 from .models import ScanResult
 from .scoring import compute_score
@@ -126,8 +127,8 @@ class AnalyzeRequest(BaseModel):
 _CHECK_TIMEOUT = 12.0  # seconds per individual check
 
 
-async def _run_checks(url: str) -> tuple[dict, dict, dict, dict]:
-    """Run all four checks concurrently, each capped by an individual timeout."""
+async def _run_checks(url: str) -> tuple[dict, dict, dict, dict, dict]:
+    """Run all five checks concurrently, each capped by an individual timeout."""
 
     async def _timed(coro, fallback: dict) -> dict:
         try:
@@ -151,6 +152,10 @@ async def _run_checks(url: str) -> tuple[dict, dict, dict, dict]:
         _timed(
             check_virustotal(url),
             {"detected": False, "malicious": 0, "suspicious": 0, "total": 0, "details": "VirusTotal check timed out."},
+        ),
+        _timed(
+            check_ip_reputation(url),
+            {"ip": None, "abuse_confidence_score": 0, "is_flagged": False, "country_code": None, "total_reports": 0, "details": "IP reputation check timed out."},
         ),
     )
 
@@ -197,6 +202,28 @@ async def _load_history(limit: int = 20) -> list[dict]:
         return []
 
 
+async def _load_report(report_id: int) -> dict | None:
+    """Return a full stored scan result by its database ID, or None if not found."""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ScanResult).where(ScanResult.id == report_id)
+            )
+            row = result.scalar_one_or_none()
+    except Exception:  # noqa: BLE001
+        return None
+    if row is None:
+        return None
+    return {
+        "id": row.id,
+        "target_url": row.url,
+        "timestamp": row.timestamp,
+        "threat_score": row.threat_score,
+        "assessment": row.assessment,
+        "checks": json.loads(row.checks_json),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -208,6 +235,15 @@ async def health():
 @app.get("/history")
 async def get_history():
     return await _load_history()
+
+
+@app.get("/report/{report_id}")
+async def get_report(report_id: int):
+    """Return a full stored scan result by its database ID."""
+    data = await _load_report(report_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Report not found.")
+    return data
 
 
 @app.post("/analyze")
@@ -225,9 +261,9 @@ async def analyze(request: Request, body: AnalyzeRequest):
     if cache_key in _cache:
         return _cache[cache_key]
 
-    safe_browsing_result, domain_age_result, ssl_result, virustotal_result = await _run_checks(target)
+    safe_browsing_result, domain_age_result, ssl_result, virustotal_result, ip_reputation_result = await _run_checks(target)
     threat_score, assessment = compute_score(
-        safe_browsing_result, domain_age_result, ssl_result, virustotal_result
+        safe_browsing_result, domain_age_result, ssl_result, virustotal_result, ip_reputation_result
     )
 
     result = {
@@ -240,6 +276,7 @@ async def analyze(request: Request, body: AnalyzeRequest):
             "domain_age": domain_age_result,
             "ssl_certificate": ssl_result,
             "virustotal": virustotal_result,
+            "ip_reputation": ip_reputation_result,
         },
     }
 

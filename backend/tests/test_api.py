@@ -14,6 +14,7 @@ _MOCK_SB = {"flagged": False, "threat_type": None, "details": "No threats detect
 _MOCK_DA = {"days_registered": 1000, "risk_level": "Low", "details": "Established domain."}
 _MOCK_SSL = {"valid": True, "issuer": "Test CA", "expires_in_days": 90, "details": "Valid SSL."}
 _MOCK_VT = {"detected": False, "malicious": 0, "suspicious": 0, "total": 84, "details": "No threats detected (84 engines checked)."}
+_MOCK_IP = {"ip": "93.184.216.34", "abuse_confidence_score": 0, "is_flagged": False, "country_code": "US", "total_reports": 0, "details": "No abuse reports."}
 
 
 # ---------------------------------------------------------------------------
@@ -36,6 +37,7 @@ class TestAnalyze:
              patch("app.main.check_domain_age", new_callable=AsyncMock, return_value=_MOCK_DA), \
              patch("app.main.check_ssl_certificate", new_callable=AsyncMock, return_value=_MOCK_SSL), \
              patch("app.main.check_virustotal", new_callable=AsyncMock, return_value=_MOCK_VT), \
+             patch("app.main.check_ip_reputation", new_callable=AsyncMock, return_value=_MOCK_IP), \
              patch("app.main._save_scan", new_callable=AsyncMock):
             response = client.post("/analyze", json={"url": "https://example.com"})
 
@@ -48,6 +50,7 @@ class TestAnalyze:
         assert "domain_age" in data["checks"]
         assert "ssl_certificate" in data["checks"]
         assert "virustotal" in data["checks"]
+        assert "ip_reputation" in data["checks"]
         assert "target_url" in data
         assert "timestamp" in data
 
@@ -56,11 +59,13 @@ class TestAnalyze:
         da = {"days_registered": 5, "risk_level": "High", "details": "New domain."}
         ssl_r = {"valid": False, "issuer": None, "expires_in_days": None, "details": "No SSL."}
         vt = {"detected": True, "malicious": 10, "suspicious": 0, "total": 80, "details": "Detected."}
+        ip_flagged = {"ip": "1.2.3.4", "abuse_confidence_score": 0, "is_flagged": False, "country_code": "US", "total_reports": 0, "details": "No reports."}
         with patch("app.main._is_ssrf_safe", return_value=True), \
              patch("app.main.check_safe_browsing", new_callable=AsyncMock, return_value=sb), \
              patch("app.main.check_domain_age", new_callable=AsyncMock, return_value=da), \
              patch("app.main.check_ssl_certificate", new_callable=AsyncMock, return_value=ssl_r), \
              patch("app.main.check_virustotal", new_callable=AsyncMock, return_value=vt), \
+             patch("app.main.check_ip_reputation", new_callable=AsyncMock, return_value=ip_flagged), \
              patch("app.main._save_scan", new_callable=AsyncMock):
             response = client.post("/analyze", json={"url": "https://evil.example.com"})
 
@@ -75,6 +80,7 @@ class TestAnalyze:
              patch("app.main.check_domain_age", new_callable=AsyncMock, return_value=_MOCK_DA), \
              patch("app.main.check_ssl_certificate", new_callable=AsyncMock, return_value=ssl_expiring), \
              patch("app.main.check_virustotal", new_callable=AsyncMock, return_value=_MOCK_VT), \
+             patch("app.main.check_ip_reputation", new_callable=AsyncMock, return_value=_MOCK_IP), \
              patch("app.main._save_scan", new_callable=AsyncMock):
             response = client.post("/analyze", json={"url": "https://expiring.example.com"})
 
@@ -128,6 +134,7 @@ class TestCaching:
              patch("app.main.check_domain_age", new_callable=AsyncMock, return_value=_MOCK_DA), \
              patch("app.main.check_ssl_certificate", new_callable=AsyncMock, return_value=_MOCK_SSL), \
              patch("app.main.check_virustotal", new_callable=AsyncMock, return_value=_MOCK_VT), \
+             patch("app.main.check_ip_reputation", new_callable=AsyncMock, return_value=_MOCK_IP), \
              patch("app.main._save_scan", new_callable=AsyncMock):
             r1 = client.post("/analyze", json={"url": "https://cache-test.example.com"})
             r2 = client.post("/analyze", json={"url": "https://cache-test.example.com"})
@@ -144,6 +151,7 @@ class TestCaching:
              patch("app.main.check_domain_age", new_callable=AsyncMock, return_value=_MOCK_DA), \
              patch("app.main.check_ssl_certificate", new_callable=AsyncMock, return_value=_MOCK_SSL), \
              patch("app.main.check_virustotal", new_callable=AsyncMock, return_value=_MOCK_VT), \
+             patch("app.main.check_ip_reputation", new_callable=AsyncMock, return_value=_MOCK_IP), \
              patch("app.main._save_scan", new_callable=AsyncMock):
             client.post("/analyze", json={"url": "https://url-a.example.com"})
             client.post("/analyze", json={"url": "https://url-b.example.com"})
@@ -184,3 +192,47 @@ class TestHistory:
         data = response.json()[0]
         for field in ("id", "url", "threat_score", "assessment", "timestamp"):
             assert field in data
+
+
+# ---------------------------------------------------------------------------
+# /report/{id}
+# ---------------------------------------------------------------------------
+class TestReport:
+    _FULL_CHECKS = {
+        "safe_browsing": _MOCK_SB,
+        "domain_age": _MOCK_DA,
+        "ssl_certificate": _MOCK_SSL,
+        "virustotal": _MOCK_VT,
+        "ip_reputation": _MOCK_IP,
+    }
+    _STORED_ROW = {
+        "id": 42,
+        "target_url": "https://example.com",
+        "timestamp": "2026-03-03T10:00:00Z",
+        "threat_score": 0,
+        "assessment": "Safe",
+        "checks": _FULL_CHECKS,
+    }
+
+    def test_returns_report_by_id(self):
+        with patch("app.main._load_report", new_callable=AsyncMock, return_value=self._STORED_ROW):
+            response = client.get("/report/42")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == 42
+        assert data["target_url"] == "https://example.com"
+
+    def test_returns_404_for_unknown_id(self):
+        with patch("app.main._load_report", new_callable=AsyncMock, return_value=None):
+            response = client.get("/report/9999")
+
+        assert response.status_code == 404
+
+    def test_report_has_checks_field(self):
+        with patch("app.main._load_report", new_callable=AsyncMock, return_value=self._STORED_ROW):
+            response = client.get("/report/42")
+
+        data = response.json()
+        assert "checks" in data
+        assert "ip_reputation" in data["checks"]

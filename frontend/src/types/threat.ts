@@ -25,11 +25,21 @@ export interface VirusTotalResult {
   details: string;
 }
 
+export interface IpReputationResult {
+  ip: string | null;
+  abuse_confidence_score: number;
+  is_flagged: boolean;
+  country_code: string | null;
+  total_reports: number;
+  details: string;
+}
+
 export interface ThreatChecks {
   safe_browsing: SafeBrowsingResult;
   domain_age: DomainAgeResult;
   ssl_certificate: SSLResult;
   virustotal: VirusTotalResult;
+  ip_reputation: IpReputationResult;
 }
 
 export type Assessment = 'Safe' | 'Suspicious' | 'Malicious';

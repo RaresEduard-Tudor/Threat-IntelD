@@ -6,12 +6,14 @@
 # ssl expiring < 14 days       → +10 points (only when cert is still valid)
 # virustotal detected          → +40 points
 # virustotal suspicious (>2)   → +15 points (only when not detected)
+# ip_reputation flagged        → +25 points
 
 def compute_score(
     safe_browsing: dict,
     domain_age: dict,
     ssl: dict,
     virustotal: dict | None = None,
+    ip_reputation: dict | None = None,
 ) -> tuple[int, str]:
     score = 0
 
@@ -36,6 +38,9 @@ def compute_score(
             score += 40
         elif virustotal.get("suspicious", 0) > 2:
             score += 15
+
+    if ip_reputation is not None and ip_reputation.get("is_flagged"):
+        score += 25
 
     score = min(score, 100)
 

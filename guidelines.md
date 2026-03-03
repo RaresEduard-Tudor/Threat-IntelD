@@ -95,6 +95,7 @@ Returns the 20 most recent scans as a list of `{ id, url, threat_score, assessme
 | Domain age Medium (< 180 days)      | +15    |
 | SSL certificate invalid             | +20    |
 | SSL expiry < 14 days                | +10    |
+| IP reputation flagged (AbuseIPDB)   | +25    |
 
 ---
 
@@ -118,6 +119,7 @@ All external HTTP calls must use `httpx.AsyncClient` with an explicit `timeout`.
 |---------------------------------|----------|------------|------------------------------------------------------------------|
 | `GOOGLE_SAFE_BROWSING_API_KEY`  | backend  | No         | Google Safe Browsing v4. Omit to skip the check.                 |
 | `VIRUSTOTAL_API_KEY`            | backend  | No         | VirusTotal v3. Omit to skip the check.                           |
+| `ABUSEIPDB_API_KEY`             | backend  | No         | AbuseIPDB v2. Omit to skip the IP reputation check.              |
 | `ALLOWED_ORIGIN`                | backend  | No         | Frontend origin for CORS. Defaults to `*`.                       |
 | `DATABASE_URL`                  | backend  | No         | SQLAlchemy async DB URL. Defaults to `sqlite+aiosqlite:///./threat_inteld.db`. |
 | `VITE_API_URL`                  | frontend | Yes (prod) | Base URL of the deployed backend service.                        |
@@ -313,12 +315,16 @@ Threat-IntelD/
 
 #### Scoring weights
 
-| Signal                        | Points |
-|-------------------------------|--------|
-| Safe Browsing flagged         | +50    |
-| Domain age High (< 30 days)   | +30    |
-| Domain age Medium (< 180 days)| +15    |
-| SSL certificate invalid       | +20    |
+| Signal                              | Points |
+|-------------------------------------|--------|
+| Safe Browsing flagged               | +50    |
+| VirusTotal detected                 | +40    |
+| VirusTotal suspicious > 2           | +15    |
+| IP reputation flagged (AbuseIPDB)   | +25    |
+| Domain age High (< 30 days)         | +30    |
+| Domain age Medium (< 180 days)      | +15    |
+| SSL certificate invalid             | +20    |
+| SSL expiry < 14 days                | +10    |
 
 ---
 
@@ -339,7 +345,9 @@ All external HTTP calls must use `httpx.AsyncClient` with an explicit `timeout`.
 
 | Variable                        | Where    | Required   | Description                              |
 |---------------------------------|----------|------------|------------------------------------------|
-| `GOOGLE_SAFE_BROWSING_API_KEY`  | backend  | Yes        | Google Safe Browsing v4 API key          |
+| `GOOGLE_SAFE_BROWSING_API_KEY`  | backend  | No         | Google Safe Browsing v4. Omit to skip.   |
+| `VIRUSTOTAL_API_KEY`            | backend  | No         | VirusTotal v3. Omit to skip.             |
+| `ABUSEIPDB_API_KEY`             | backend  | No         | AbuseIPDB v2. Omit to skip.              |
 | `VITE_API_URL`                  | frontend | Yes (prod) | Base URL of the deployed backend         |
 
 Copy `.env.example` to `.env` in both `backend/` and `frontend/` before running locally.

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ThreatReport } from '../types/threat';
 import AssessmentBadge from './AssessmentBadge';
 import ThreatScoreDonut from './ThreatScoreDonut';
@@ -5,10 +6,23 @@ import CheckCard from './CheckCard';
 
 interface Props {
   report: ThreatReport;
+  reportId?: number;
 }
 
-export default function ResultsDashboard({ report }: Props) {
+export default function ResultsDashboard({ report, reportId }: Props) {
   const { target_url, timestamp, threat_score, assessment, checks } = report;
+  const [copied, setCopied] = useState(false);
+
+  function handleShare() {
+    if (reportId == null) return;
+    const url = new URL(window.location.href);
+    url.search = '';
+    url.searchParams.set('id', String(reportId));
+    navigator.clipboard.writeText(url.toString()).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
 
   return (
     <div className="w-full max-w-3xl mx-auto mt-10 flex flex-col gap-8 animate-fade-in">
@@ -31,6 +45,14 @@ export default function ResultsDashboard({ report }: Props) {
           <p className="text-xs text-gray-600">
             Analyzed at {new Date(timestamp).toLocaleString()}
           </p>
+          {reportId != null && (
+            <button
+              onClick={handleShare}
+              className="mt-1 self-start text-xs text-blue-500 hover:text-blue-400 transition-colors"
+            >
+              {copied ? '✅ Link copied!' : '🔗 Copy shareable link'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -90,6 +112,17 @@ export default function ResultsDashboard({ report }: Props) {
                 ? `${checks.virustotal.malicious} / ${checks.virustotal.total}`
                 : null,
             },
+          ]}
+        />
+        <CheckCard
+          title="IP Reputation"
+          icon="🌐"
+          passed={!checks.ip_reputation.is_flagged}
+          details={checks.ip_reputation.details}
+          meta={[
+            { label: 'IP Address', value: checks.ip_reputation.ip },
+            { label: 'Abuse Score', value: checks.ip_reputation.abuse_confidence_score !== null ? `${checks.ip_reputation.abuse_confidence_score}/100` : null },
+            { label: 'Country', value: checks.ip_reputation.country_code },
           ]}
         />
       </div>

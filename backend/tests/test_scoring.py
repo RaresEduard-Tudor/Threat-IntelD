@@ -119,6 +119,28 @@ class TestComputeScore:
         score, _ = compute_score(_sb(), _da(), _ssl(), _vt(detected=False, suspicious=2, total=80))
         assert score == 0
 
+    def test_ip_reputation_flagged_adds_25(self):
+        ip = {"ip": "1.2.3.4", "abuse_confidence_score": 80, "is_flagged": True, "country_code": "US", "total_reports": 10, "details": "Flagged."}
+        score, assessment = compute_score(_sb(), _da(), _ssl(), ip_reputation=ip)
+        assert score == 25
+        assert assessment == "Safe"
+
+    def test_ip_reputation_not_flagged_adds_zero(self):
+        ip = {"ip": "1.2.3.4", "abuse_confidence_score": 0, "is_flagged": False, "country_code": "US", "total_reports": 0, "details": "Clean."}
+        score, _ = compute_score(_sb(), _da(), _ssl(), ip_reputation=ip)
+        assert score == 0
+
+    def test_ip_reputation_none_does_not_affect_score(self):
+        score, _ = compute_score(_sb(), _da(), _ssl(), ip_reputation=None)
+        assert score == 0
+
+    def test_ip_reputation_flagged_combines_with_other_signals(self):
+        ip = {"ip": "1.2.3.4", "abuse_confidence_score": 80, "is_flagged": True, "country_code": "US", "total_reports": 10, "details": "Flagged."}
+        # safe_browsing (50) + ip_reputation (25) = 75 → Malicious
+        score, assessment = compute_score(_sb(flagged=True), _da(), _ssl(), ip_reputation=ip)
+        assert score == 75
+        assert assessment == "Malicious"
+
     def test_virustotal_detected_combined_with_safe_browsing(self):
         # safe_browsing +50, virustotal detected +40 = 90 → Malicious
         score, assessment = compute_score(_sb(flagged=True), _da(), _ssl(), _vt(detected=True, malicious=5, total=80))
