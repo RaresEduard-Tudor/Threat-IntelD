@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+tests/
+pytest.ini
+requirements-dev.txt
+.git/
+.vscode/
+*.md

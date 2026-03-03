@@ -69,6 +69,27 @@ export default function ResultsDashboard({ report }: Props) {
           meta={[
             { label: 'Valid', value: checks.ssl_certificate.valid ? 'Yes' : 'No' },
             { label: 'Issuer', value: checks.ssl_certificate.issuer },
+            {
+              label: 'Expires In',
+              value: checks.ssl_certificate.expires_in_days !== null
+                ? `${checks.ssl_certificate.expires_in_days} days`
+                : null,
+            },
+          ]}
+        />
+        <CheckCard
+          title="VirusTotal"
+          icon="🦠"
+          passed={!checks.virustotal.detected}
+          details={checks.virustotal.details}
+          meta={[
+            { label: 'Detected', value: checks.virustotal.detected ? 'Yes' : 'No' },
+            {
+              label: 'Engines (Malicious / Total)',
+              value: checks.virustotal.total > 0
+                ? `${checks.virustotal.malicious} / ${checks.virustotal.total}`
+                : null,
+            },
           ]}
         />
       </div>

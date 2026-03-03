@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+.vite/
+*.test.tsx
+*.test.ts
+setupTests.ts
+coverage/

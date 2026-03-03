@@ -1,0 +1,20 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - ALLOWED_ORIGIN=http://localhost
+    # Copy backend/.env.example → backend/.env and fill in your API key
+    env_file:
+      - path: ./backend/.env
+        required: false
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend

@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend (Python)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        working-directory: backend
+        run: |
+          pip install ruff
+          ruff check app/
+
+      - name: Type-check (mypy)
+        working-directory: backend
+        run: |
+          pip install mypy
+          mypy app/ --ignore-missing-imports
+
+      - name: Test (pytest)
+        working-directory: backend
+        env:
+          GOOGLE_SAFE_BROWSING_API_KEY: dummy
+          ALLOWED_ORIGIN: http://localhost
+        run: pytest -q
+
+  frontend:
+    name: Frontend (TypeScript / React)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: yarn install --frozen-lockfile
+
+      - name: Type-check (tsc)
+        working-directory: frontend
+        run: yarn tsc --noEmit
+
+      - name: Test (vitest)
+        working-directory: frontend
+        run: yarn test

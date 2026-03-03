@@ -1,5 +1,20 @@
-# Render deployment config for the FastAPI backend
-# Set environment: Python 3.11
-# Build command: pip install -r requirements.txt
-# Start command below:
-# uvicorn app.main:app --host 0.0.0.0 --port $PORT
+# Render Blueprint — copy this file to the repository root to enable one-click deploy.
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: threat-inteld-backend
+    runtime: python
+    region: oregon
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: GOOGLE_SAFE_BROWSING_API_KEY
+        sync: false   # set manually in Render dashboard
+      - key: VIRUSTOTAL_API_KEY
+        sync: false   # set manually in Render dashboard
+      - key: ALLOWED_ORIGIN
+        sync: false   # set to your Vercel frontend URL, e.g. https://your-app.vercel.app

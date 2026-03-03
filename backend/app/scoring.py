@@ -1,13 +1,17 @@
 # Threat Score Weights
-# safe_browsing flagged  → +50 points
-# domain_age High risk   → +30 points
-# domain_age Medium risk → +15 points
-# ssl invalid            → +20 points
+# safe_browsing flagged        → +50 points
+# domain_age High risk         → +30 points
+# domain_age Medium risk       → +15 points
+# ssl invalid                  → +20 points
+# ssl expiring < 14 days       → +10 points (only when cert is still valid)
+# virustotal detected          → +40 points
+# virustotal suspicious (>2)   → +15 points (only when not detected)
 
 def compute_score(
     safe_browsing: dict,
     domain_age: dict,
     ssl: dict,
+    virustotal: dict | None = None,
 ) -> tuple[int, str]:
     score = 0
 
@@ -22,6 +26,16 @@ def compute_score(
 
     if not ssl.get("valid"):
         score += 20
+    else:
+        expires_in_days = ssl.get("expires_in_days")
+        if expires_in_days is not None and 0 <= expires_in_days < 14:
+            score += 10
+
+    if virustotal is not None:
+        if virustotal.get("detected"):
+            score += 40
+        elif virustotal.get("suspicious", 0) > 2:
+            score += 15
 
     score = min(score, 100)
 

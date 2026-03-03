@@ -1,13 +1,25 @@
-import { useState } from 'react';
-import type { ThreatReport } from './types/threat';
+import { useEffect, useState } from 'react';
+import type { ThreatReport, HistoryEntry } from './types/threat';
 import { analyzeUrl } from './api/analyze';
+import { fetchHistory } from './api/history';
 import UrlForm from './components/UrlForm';
 import ResultsDashboard from './components/ResultsDashboard';
+import HistoryPanel from './components/HistoryPanel';
 
 export default function App() {
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState<ThreatReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+
+  async function loadHistory() {
+    const entries = await fetchHistory();
+    setHistory(entries);
+    setHistoryLoading(false);
+  }
+
+  useEffect(() => { loadHistory(); }, []);
 
   async function handleSubmit(url: string) {
     setLoading(true);
@@ -16,6 +28,7 @@ export default function App() {
     try {
       const result = await analyzeUrl(url);
       setReport(result);
+      await loadHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An unexpected error occurred.');
     } finally {
@@ -55,9 +68,19 @@ export default function App() {
 
       {report && <ResultsDashboard report={report} />}
 
+      <HistoryPanel
+        entries={history}
+        loading={historyLoading}
+        onSelect={handleSubmit}
+      />
+
       <footer className="mt-20 text-xs text-gray-700">
-        Threat-IntelD &mdash; powered by Google Safe Browsing, WHOIS &amp; SSL checks
+        Threat-IntelD &mdash; powered by Google Safe Browsing, VirusTotal, WHOIS &amp; SSL checks
       </footer>
+    </div>
+  );
+}
+
     </div>
   );
 }
