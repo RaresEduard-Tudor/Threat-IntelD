@@ -168,6 +168,24 @@ export default function ResultsDashboard({ report, reportId }: Props) {
             { label: 'Risk Score', value: `${checks.url_heuristics.risk_score}/5` },
           ]}
         />
+        <CheckCard
+          title="DNS Blacklist"
+          icon="🚫"
+          passed={!checks.dnsbl.flagged}
+          details={checks.dnsbl.details}
+          meta={[
+            { label: 'Listed In', value: checks.dnsbl.listed_in.length > 0 ? checks.dnsbl.listed_in.join(', ') : 'None' },
+          ]}
+        />
+        <CheckCard
+          title="OpenPhish"
+          icon="🎣"
+          passed={!checks.openphish.flagged}
+          details={checks.openphish.details}
+          meta={[
+            { label: 'Flagged', value: checks.openphish.flagged ? 'Yes' : 'No' },
+          ]}
+        />
       </div>
     </div>
   );

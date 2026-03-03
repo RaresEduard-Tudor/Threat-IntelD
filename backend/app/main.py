@@ -1,12 +1,14 @@
 import asyncio
 import hashlib
 import ipaddress
+import itertools
 import json
 import os
 import socket
+from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from cachetools import TTLCache
 from dotenv import load_dotenv
@@ -17,8 +19,6 @@ from pydantic import BaseModel, HttpUrl
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-from sqlalchemy import select
-
 load_dotenv()  # must run before importing check modules that read env vars
 
 from .checks.safe_browsing import check_safe_browsing
@@ -28,22 +28,16 @@ from .checks.virustotal import check_virustotal
 from .checks.ip_reputation import check_ip_reputation
 from .checks.url_heuristics import check_url_heuristics
 from .checks.screenshot import take_screenshot
-from .database import AsyncSessionLocal, init_db
-from .models import ScanResult
+from .checks.dnsbl import check_dnsbl
+from .checks.openphish import check_openphish
 from .scoring import compute_score
-
-load_dotenv()
 
 
 # ---------------------------------------------------------------------------
-# Lifespan — initialise the database on startup
+# Lifespan
 # ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    try:
-        await init_db()
-    except Exception:  # noqa: BLE001
-        pass  # DB failures must not prevent the app from starting
     yield
 
 
@@ -80,6 +74,12 @@ app.add_middleware(
 # Result cache: 10-minute TTL, max 500 entries (asyncio-safe, single-process)
 # ---------------------------------------------------------------------------
 _cache: TTLCache = TTLCache(maxsize=500, ttl=600)
+
+# ---------------------------------------------------------------------------
+# In-memory scan history (last 50 entries; resets on server restart)
+# ---------------------------------------------------------------------------
+_history_store: deque[dict] = deque(maxlen=50)
+_id_counter = itertools.count(1)
 
 # ---------------------------------------------------------------------------
 # Global exception handler — prevents stack traces leaking in 500 responses
@@ -132,6 +132,25 @@ _CHECK_TIMEOUT = 12.0     # seconds per individual check
 _SCREENSHOT_TIMEOUT = 15.0  # screenshot can be slower
 
 
+def _canonical_url(url: str) -> str:
+    """Lowercase scheme+host, strip default ports/fragment for cache deduplication."""
+    try:
+        p = urlparse(url)
+        scheme = p.scheme.lower()
+        host = p.hostname or ""
+        port = p.port
+        if port and not (
+            (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
+        ):
+            netloc = f"{host}:{port}"
+        else:
+            netloc = host
+        path = p.path.rstrip("/") or "/"
+        return urlunparse((scheme, netloc, path, p.params, p.query, ""))
+    except Exception:
+        return url
+
+
 async def _take_screenshot_safe(url: str) -> dict:
     """Run take_screenshot with a hard timeout; return a failure dict on timeout."""
     try:
@@ -140,8 +159,8 @@ async def _take_screenshot_safe(url: str) -> dict:
         return {"available": False, "image_b64": None, "details": "Screenshot timed out."}
 
 
-async def _run_checks(url: str) -> tuple[dict, dict, dict, dict, dict, dict]:
-    """Run all six checks concurrently, each capped by an individual timeout."""
+async def _run_checks(url: str) -> tuple[dict, dict, dict, dict, dict, dict, dict, dict]:
+    """Run all eight checks concurrently, each capped by an individual timeout."""
 
     async def _timed(coro, fallback: dict) -> dict:
         try:
@@ -174,96 +193,61 @@ async def _run_checks(url: str) -> tuple[dict, dict, dict, dict, dict, dict]:
             check_url_heuristics(url),
             {"is_suspicious": False, "flag_count": 0, "flags": [], "risk_score": 0, "details": "URL heuristics check timed out."},
         ),
+        _timed(
+            check_dnsbl(url),
+            {"flagged": False, "listed_in": [], "details": "DNSBL check timed out."},
+        ),
+        _timed(
+            check_openphish(url),
+            {"flagged": False, "details": "OpenPhish check timed out."},
+        ),
     )
 
 
 # ---------------------------------------------------------------------------
-# Database helpers
+# In-memory history helpers
 # ---------------------------------------------------------------------------
 async def _save_scan(result: dict) -> None:
-    """Persist a completed scan to the history table (best-effort)."""
-    try:
-        async with AsyncSessionLocal() as session:
-            row = ScanResult(
-                url=result["target_url"],
-                threat_score=result["threat_score"],
-                assessment=result["assessment"],
-                checks_json=json.dumps(result["checks"]),
-                timestamp=result["timestamp"],
-            )
-            session.add(row)
-            await session.commit()
-    except Exception:  # noqa: BLE001
-        pass  # DB failures must not affect the API response
+    """Prepend a completed scan to the in-memory history ring-buffer."""
+    scan_id = next(_id_counter)
+    _history_store.appendleft({"id": scan_id, **result})
 
 
 async def _load_history(limit: int = 20) -> list[dict]:
     """Return the most recent scans, newest first."""
-    try:
-        async with AsyncSessionLocal() as session:
-            result = await session.execute(
-                select(ScanResult).order_by(ScanResult.id.desc()).limit(limit)
-            )
-            rows = result.scalars().all()
-        return [
-            {
-                "id": r.id,
-                "url": r.url,
-                "threat_score": r.threat_score,
-                "assessment": r.assessment,
-                "timestamp": r.timestamp,
-            }
-            for r in rows
-        ]
-    except Exception:  # noqa: BLE001
-        return []
+    return [
+        {
+            "id": e["id"],
+            "url": e["target_url"],
+            "threat_score": e["threat_score"],
+            "assessment": e["assessment"],
+            "timestamp": e["timestamp"],
+        }
+        for e in list(_history_store)[:limit]
+    ]
 
 
 async def _load_report(report_id: int) -> dict | None:
-    """Return a full stored scan result by its database ID, or None if not found."""
-    try:
-        async with AsyncSessionLocal() as session:
-            result = await session.execute(
-                select(ScanResult).where(ScanResult.id == report_id)
-            )
-            row = result.scalar_one_or_none()
-    except Exception:  # noqa: BLE001
-        return None
-    if row is None:
-        return None
-    return {
-        "id": row.id,
-        "target_url": row.url,
-        "timestamp": row.timestamp,
-        "threat_score": row.threat_score,
-        "assessment": row.assessment,
-        "checks": json.loads(row.checks_json),
-    }
+    """Return a full stored scan result by its in-memory ID, or None if not found."""
+    for entry in _history_store:
+        if entry["id"] == report_id:
+            return entry
+    return None
 
 
 async def _load_trending(limit: int = 20) -> list[dict]:
     """Return the most recent malicious or suspicious scans, newest first."""
-    try:
-        async with AsyncSessionLocal() as session:
-            result = await session.execute(
-                select(ScanResult)
-                .where(ScanResult.assessment.in_(["Malicious", "Suspicious"]))
-                .order_by(ScanResult.id.desc())
-                .limit(limit)
-            )
-            rows = result.scalars().all()
-        return [
-            {
-                "id": r.id,
-                "url": r.url,
-                "threat_score": r.threat_score,
-                "assessment": r.assessment,
-                "timestamp": r.timestamp,
-            }
-            for r in rows
-        ]
-    except Exception:  # noqa: BLE001
-        return []
+    entries = [e for e in _history_store if e["assessment"] in ("Malicious", "Suspicious")]
+    return [
+        {
+            "id": e["id"],
+            "url": e["target_url"],
+            "threat_score": e["threat_score"],
+            "assessment": e["assessment"],
+            "timestamp": e["timestamp"],
+        }
+        for e in entries[:limit]
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -305,7 +289,7 @@ async def analyze(request: Request, body: AnalyzeRequest):
             detail="URL resolves to a private or reserved address.",
         )
 
-    cache_key = hashlib.sha256(target.encode()).hexdigest()
+    cache_key = hashlib.sha256(_canonical_url(target).encode()).hexdigest()
     if cache_key in _cache:
         screenshot = await _take_screenshot_safe(target)
         return {**_cache[cache_key], "screenshot": screenshot}
@@ -317,13 +301,15 @@ async def analyze(request: Request, body: AnalyzeRequest):
         virustotal_result,
         ip_reputation_result,
         url_heuristics_result,
+        dnsbl_result,
+        openphish_result,
     ), screenshot = await asyncio.gather(
         _run_checks(target),
         _take_screenshot_safe(target),
     )
 
     threat_score, assessment = compute_score(
-        safe_browsing_result, domain_age_result, ssl_result, virustotal_result, ip_reputation_result, url_heuristics_result
+        safe_browsing_result, domain_age_result, ssl_result, virustotal_result, ip_reputation_result, url_heuristics_result, openphish_result, dnsbl_result
     )
 
     cacheable = {
@@ -338,6 +324,8 @@ async def analyze(request: Request, body: AnalyzeRequest):
             "virustotal": virustotal_result,
             "ip_reputation": ip_reputation_result,
             "url_heuristics": url_heuristics_result,
+            "dnsbl": dnsbl_result,
+            "openphish": openphish_result,
         },
     }
 

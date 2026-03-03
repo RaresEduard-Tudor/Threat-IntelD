@@ -8,6 +8,8 @@
 # virustotal suspicious (>2)   → +15 points (only when not detected)
 # ip_reputation flagged        → +25 points
 # url_heuristics flag_count≥1  → +5 pts; ≥3 → +10 pts; ≥5 → +20 pts
+# openphish flagged           → +40 points
+# dnsbl flagged               → +20 points
 
 def compute_score(
     safe_browsing: dict,
@@ -16,6 +18,8 @@ def compute_score(
     virustotal: dict | None = None,
     ip_reputation: dict | None = None,
     url_heuristics: dict | None = None,
+    openphish: dict | None = None,
+    dnsbl: dict | None = None,
 ) -> tuple[int, str]:
     score = 0
 
@@ -52,6 +56,12 @@ def compute_score(
             score += 10
         elif flag_count >= 1:
             score += 5
+
+    if openphish is not None and openphish.get("flagged"):
+        score += 40
+
+    if dnsbl is not None and dnsbl.get("flagged"):
+        score += 20
 
     score = min(score, 100)
 

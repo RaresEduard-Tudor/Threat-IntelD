@@ -15,6 +15,8 @@ const baseReport: ThreatReport = {
     virustotal: { detected: false, malicious: 0, suspicious: 0, total: 84, details: 'No threats detected (84 engines checked).' },
     ip_reputation: { ip: '93.184.216.34', abuse_confidence_score: 0, is_flagged: false, country_code: 'US', total_reports: 0, details: 'No abuse reports.' },
     url_heuristics: { is_suspicious: false, flag_count: 0, flags: [], risk_score: 0, details: 'No suspicious URL patterns detected.' },
+    dnsbl: { flagged: false, listed_in: [], details: 'IP not listed in any DNS blocklist.' },
+    openphish: { flagged: false, details: 'Not found in OpenPhish feed.' },
   },
 };
 
@@ -37,6 +39,8 @@ describe('ResultsDashboard', () => {
     expect(screen.getByText('VirusTotal')).toBeInTheDocument();
     expect(screen.getByText('IP Reputation')).toBeInTheDocument();
     expect(screen.getByText('URL Heuristics')).toBeInTheDocument();
+    expect(screen.getByText('DNS Blacklist')).toBeInTheDocument();
+    expect(screen.getByText('OpenPhish')).toBeInTheDocument();
   });
 
   it('shows domain days registered', () => {

@@ -42,6 +42,17 @@ export interface UrlHeuristicsResult {
   details: string;
 }
 
+export interface DNSBLResult {
+  flagged: boolean;
+  listed_in: string[];
+  details: string;
+}
+
+export interface OpenPhishResult {
+  flagged: boolean;
+  details: string;
+}
+
 export interface ScreenshotResult {
   available: boolean;
   image_b64: string | null;
@@ -55,6 +66,8 @@ export interface ThreatChecks {
   virustotal: VirusTotalResult;
   ip_reputation: IpReputationResult;
   url_heuristics: UrlHeuristicsResult;
+  dnsbl: DNSBLResult;
+  openphish: OpenPhishResult;
 }
 
 export type Assessment = 'Safe' | 'Suspicious' | 'Malicious';
