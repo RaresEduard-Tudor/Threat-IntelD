@@ -15,7 +15,6 @@ const baseReport: ThreatReport = {
     virustotal: { detected: false, malicious: 0, suspicious: 0, total: 84, details: 'No threats detected (84 engines checked).' },
     ip_reputation: { ip: '93.184.216.34', abuse_confidence_score: 0, is_flagged: false, country_code: 'US', total_reports: 0, details: 'No abuse reports.' },
     url_heuristics: { is_suspicious: false, flag_count: 0, flags: [], risk_score: 0, details: 'No suspicious URL patterns detected.' },
-    urlhaus: { flagged: false, threat_type: null, query_status: 'no_results', details: 'Not found in URLhaus database.' },
   },
 };
 

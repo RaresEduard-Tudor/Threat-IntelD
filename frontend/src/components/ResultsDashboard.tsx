@@ -168,17 +168,6 @@ export default function ResultsDashboard({ report, reportId }: Props) {
             { label: 'Risk Score', value: `${checks.url_heuristics.risk_score}/5` },
           ]}
         />
-        <CheckCard
-          title="URLhaus"
-          icon="☣️"
-          passed={!checks.urlhaus.flagged}
-          details={checks.urlhaus.details}
-          meta={[
-            { label: 'Flagged', value: checks.urlhaus.flagged ? 'Yes' : 'No' },
-            { label: 'Status', value: checks.urlhaus.query_status },
-            { label: 'Threat', value: checks.urlhaus.threat_type },
-          ]}
-        />
       </div>
     </div>
   );

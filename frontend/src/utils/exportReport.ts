@@ -84,7 +84,6 @@ function buildHtml(r: ThreatReport): string {
       ${checkRow('VirusTotal', !checks.virustotal.detected, checks.virustotal.details)}
       ${checkRow('IP Reputation', !checks.ip_reputation.is_flagged, checks.ip_reputation.details)}
       ${checkRow('URL Heuristics', !checks.url_heuristics.is_suspicious, checks.url_heuristics.details)}
-      ${checkRow('URLhaus', !checks.urlhaus.flagged, checks.urlhaus.details)}
     </tbody>
   </table>
   ${heuristicFlags}

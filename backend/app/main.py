@@ -27,7 +27,6 @@ from .checks.ssl_certificate import check_ssl_certificate
 from .checks.virustotal import check_virustotal
 from .checks.ip_reputation import check_ip_reputation
 from .checks.url_heuristics import check_url_heuristics
-from .checks.urlhaus import check_urlhaus
 from .checks.screenshot import take_screenshot
 from .database import AsyncSessionLocal, init_db
 from .models import ScanResult
@@ -141,8 +140,8 @@ async def _take_screenshot_safe(url: str) -> dict:
         return {"available": False, "image_b64": None, "details": "Screenshot timed out."}
 
 
-async def _run_checks(url: str) -> tuple[dict, dict, dict, dict, dict, dict, dict]:
-    """Run all seven checks concurrently, each capped by an individual timeout."""
+async def _run_checks(url: str) -> tuple[dict, dict, dict, dict, dict, dict]:
+    """Run all six checks concurrently, each capped by an individual timeout."""
 
     async def _timed(coro, fallback: dict) -> dict:
         try:
@@ -174,10 +173,6 @@ async def _run_checks(url: str) -> tuple[dict, dict, dict, dict, dict, dict, dic
         _timed(
             check_url_heuristics(url),
             {"is_suspicious": False, "flag_count": 0, "flags": [], "risk_score": 0, "details": "URL heuristics check timed out."},
-        ),
-        _timed(
-            check_urlhaus(url),
-            {"flagged": False, "threat_type": None, "query_status": "error", "details": "URLhaus check timed out."},
         ),
     )
 
@@ -322,14 +317,13 @@ async def analyze(request: Request, body: AnalyzeRequest):
         virustotal_result,
         ip_reputation_result,
         url_heuristics_result,
-        urlhaus_result,
     ), screenshot = await asyncio.gather(
         _run_checks(target),
         _take_screenshot_safe(target),
     )
 
     threat_score, assessment = compute_score(
-        safe_browsing_result, domain_age_result, ssl_result, virustotal_result, ip_reputation_result, url_heuristics_result, urlhaus_result
+        safe_browsing_result, domain_age_result, ssl_result, virustotal_result, ip_reputation_result, url_heuristics_result
     )
 
     cacheable = {
@@ -344,7 +338,6 @@ async def analyze(request: Request, body: AnalyzeRequest):
             "virustotal": virustotal_result,
             "ip_reputation": ip_reputation_result,
             "url_heuristics": url_heuristics_result,
-            "urlhaus": urlhaus_result,
         },
     }
 
