@@ -10,6 +10,9 @@ export async function analyzeUrl(url: string): Promise<ThreatReport> {
   });
 
   if (!response.ok) {
+    if (response.status === 429) {
+      throw new Error('Rate limit reached — please wait a moment before trying again.');
+    }
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
     throw new Error(error.detail ?? `Server returned ${response.status}`);
   }

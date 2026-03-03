@@ -2,15 +2,16 @@ interface CheckCardProps {
   title: string;
   icon: string;
   passed: boolean;
+  skipped?: boolean;
   details: string;
   meta?: { label: string; value: string | number | null }[];
 }
 
-export default function CheckCard({ title, icon, passed, details, meta }: CheckCardProps) {
-  const borderColor = passed ? 'border-green-800' : 'border-red-800';
-  const iconBg = passed ? 'bg-green-900/50 text-green-400' : 'bg-red-900/50 text-red-400';
-  const statusText = passed ? 'PASSED' : 'FAILED';
-  const statusColor = passed ? 'text-green-400' : 'text-red-400';
+export default function CheckCard({ title, icon, passed, skipped, details, meta }: CheckCardProps) {
+  const borderColor = skipped ? 'border-gray-700' : passed ? 'border-green-800' : 'border-red-800';
+  const iconBg = skipped ? 'bg-gray-800 text-gray-500' : passed ? 'bg-green-900/50 text-green-400' : 'bg-red-900/50 text-red-400';
+  const statusText = skipped ? 'SKIPPED' : passed ? 'PASSED' : 'FAILED';
+  const statusColor = skipped ? 'text-gray-500' : passed ? 'text-green-400' : 'text-red-400';
 
   return (
     <div className={`rounded-xl border ${borderColor} bg-gray-900 p-5 flex flex-col gap-3`}>

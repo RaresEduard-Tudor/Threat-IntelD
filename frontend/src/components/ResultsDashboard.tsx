@@ -77,6 +77,7 @@ export default function ResultsDashboard({ report, reportId }: Props) {
           title="Google Safe Browsing"
           icon="🛡️"
           passed={!checks.safe_browsing.flagged}
+          skipped={checks.safe_browsing.details.includes('skipped')}
           details={checks.safe_browsing.details}
           meta={[
             { label: 'Flagged', value: checks.safe_browsing.flagged ? 'Yes' : 'No' },
@@ -118,6 +119,7 @@ export default function ResultsDashboard({ report, reportId }: Props) {
           title="VirusTotal"
           icon="🦠"
           passed={!checks.virustotal.detected}
+          skipped={checks.virustotal.details.includes('skipped')}
           details={checks.virustotal.details}
           meta={[
             { label: 'Detected', value: checks.virustotal.detected ? 'Yes' : 'No' },
@@ -133,6 +135,7 @@ export default function ResultsDashboard({ report, reportId }: Props) {
           title="IP Reputation"
           icon="🌐"
           passed={!checks.ip_reputation.is_flagged}
+          skipped={checks.ip_reputation.details.includes('skipped')}
           details={checks.ip_reputation.details}
           meta={[
             { label: 'IP Address', value: checks.ip_reputation.ip },
