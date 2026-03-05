@@ -10,8 +10,7 @@
 # ip_reputation flagged           → +25 points
 # url_heuristics flag_count≥1     → +5 pts; ≥3 → +10 pts; ≥5 → +20 pts
 # openphish flagged               → +40 points
-# dnsbl 2+ lists agree            → +20 points  (strong signal)
-# dnsbl 1 list only               → +8 points   (weak signal, possible FP)
+# dnsbl flagged                   → +20 points
 
 def compute_score(
     safe_browsing: dict,
@@ -65,12 +64,8 @@ def compute_score(
     if openphish is not None and openphish.get("flagged"):
         score += 40
 
-    if dnsbl is not None:
-        dnsbl_hits = len(dnsbl.get("listed_in", []))
-        if dnsbl_hits >= 2:
-            score += 20  # multiple lists agree — strong signal
-        elif dnsbl_hits == 1:
-            score += 8   # single list — weak signal, CDN IPs prone to false positives
+    if dnsbl is not None and dnsbl.get("flagged"):
+        score += 20
 
     score = min(score, 100)
 

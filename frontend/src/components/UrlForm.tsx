@@ -18,6 +18,9 @@ export default function UrlForm({ onSubmit, loading }: Props) {
         setError('Only HTTP and HTTPS URLs are supported.');
         return;
       }
+      // Strip query string and fragment — keeps scheme + host + path
+      parsed.search = '';
+      parsed.hash = '';
       onSubmit(parsed.toString());
     } catch {
       setError('Please enter a valid URL (e.g. https://example.com).');
