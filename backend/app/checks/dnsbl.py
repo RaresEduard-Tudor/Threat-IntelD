@@ -3,14 +3,17 @@ import socket
 from urllib.parse import urlparse
 
 # Public DNS blocklists — queried via reverse-IP DNS lookup (no API key required)
+# sbl-xbl.spamhaus.org = SBL (spam sources) + XBL (botnets/exploits), excludes
+# PBL (Policy Block List) which flags dynamic/residential IP ranges and produces
+# false positives against legitimate CDN and cloud hosting IPs.
 _DNSBLS = [
-    "zen.spamhaus.org",
+    "sbl-xbl.spamhaus.org",
     "bl.spamcop.net",
 ]
 
 
 async def check_dnsbl(url: str) -> dict:
-    """Reverse-IP lookup against common DNS blocklists (zen.spamhaus.org, bl.spamcop.net)."""
+    """Reverse-IP lookup against DNS blocklists (sbl-xbl.spamhaus.org, bl.spamcop.net)."""
     hostname = urlparse(url).hostname
     if not hostname:
         return {"flagged": False, "listed_in": [], "details": "Invalid hostname."}
