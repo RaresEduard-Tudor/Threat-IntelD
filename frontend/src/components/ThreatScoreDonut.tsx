@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import type { Assessment } from '../types/threat';
 
@@ -12,7 +13,7 @@ const scoreColor: Record<Assessment, string> = {
   Malicious: '#ef4444',
 };
 
-export default function ThreatScoreDonut({ score, assessment }: Props) {
+export default memo(function ThreatScoreDonut({ score, assessment }: Props) {
   const color = scoreColor[assessment];
   const data = [
     { name: 'Score', value: score },
@@ -54,4 +55,4 @@ export default function ThreatScoreDonut({ score, assessment }: Props) {
       <p className="mt-2 text-gray-400 text-sm">Threat Score</p>
     </div>
   );
-}
+});

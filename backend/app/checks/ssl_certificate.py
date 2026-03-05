@@ -1,8 +1,11 @@
 import asyncio
-import ssl
+import logging
 import socket
+import ssl
 from datetime import datetime, timezone
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 
 def _check_ssl(hostname: str) -> dict:
@@ -67,6 +70,7 @@ def _check_ssl(hostname: str) -> dict:
             "details": "No valid SSL certificate found. Connection is not secure.",
         }
     except Exception as e:
+        logger.warning("SSL check failed for %s: %s", hostname, e, exc_info=True)
         return {
             "valid": False,
             "issuer": None,

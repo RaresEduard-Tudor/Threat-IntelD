@@ -19,15 +19,17 @@ export default function App() {
   const [trending, setTrending] = useState<HistoryEntry[]>([]);
   const [trendingLoading, setTrendingLoading] = useState(true);
 
-  async function loadHistory() {
-    const entries = await fetchHistory();
-    setHistory(entries);
-    setHistoryLoading(false);
-  }
-
   useEffect(() => {
-    loadHistory();
-    fetchTrending().then((e) => { setTrending(e); setTrendingLoading(false); });
+    let cancelled = false;
+
+    fetchHistory()
+      .then((entries) => { if (!cancelled) { setHistory(entries); setHistoryLoading(false); } })
+      .catch(() => { if (!cancelled) setHistoryLoading(false); });
+
+    fetchTrending()
+      .then((e) => { if (!cancelled) { setTrending(e); setTrendingLoading(false); } })
+      .catch(() => { if (!cancelled) setTrendingLoading(false); });
+
     // Load a shared report if ?id= is present in the URL
     const params = new URLSearchParams(window.location.search);
     const id = params.get('id');
@@ -35,13 +37,15 @@ export default function App() {
       const numId = parseInt(id, 10);
       if (!isNaN(numId)) {
         fetchReport(numId).then((r) => {
-          if (r) {
+          if (!cancelled && r) {
             setReport(r);
             setReportId(numId);
           }
         });
       }
     }
+
+    return () => { cancelled = true; };
   }, []);
 
   async function handleSubmit(url: string) {
@@ -58,7 +62,7 @@ export default function App() {
       setHistory(entries);
       setHistoryLoading(false);
       // Refresh trending feed after a new scan
-      fetchTrending().then((e) => { setTrending(e); setTrendingLoading(false); });
+      fetchTrending().then((e) => { setTrending(e); setTrendingLoading(false); }).catch(() => {});
       // Pick up the id of the scan we just saved (it will be the newest entry)
       if (entries.length > 0 && entries[0].url === result.target_url) {
         setReportId(entries[0].id);

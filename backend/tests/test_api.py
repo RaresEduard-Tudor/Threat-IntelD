@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import app, _history_store
 
 client = TestClient(app, raise_server_exceptions=False)
 
@@ -298,3 +298,194 @@ class TestReport:
         data = response.json()
         assert "checks" in data
         assert "ip_reputation" in data["checks"]
+
+
+# ---------------------------------------------------------------------------
+# Concurrent requests
+# ---------------------------------------------------------------------------
+class TestConcurrentRequests:
+    """Verify the API handles multiple simultaneous requests correctly."""
+
+    def test_concurrent_analyze_different_urls_produce_independent_results(self):
+        """Two different URLs analyzed concurrently should produce separate results."""
+        sb_clean = {"flagged": False, "threat_type": None, "details": "Clean."}
+        sb_dirty = {"flagged": True, "threat_type": "MALWARE", "details": "Malware detected."}
+
+        call_count = {"value": 0}
+
+        async def side_effect_sb(url):
+            call_count["value"] += 1
+            if "evil" in url:
+                return sb_dirty
+            return sb_clean
+
+        sb_mock = AsyncMock(side_effect=side_effect_sb)
+        with patch("app.main._is_ssrf_safe", return_value=True), \
+             patch("app.main.check_safe_browsing", sb_mock), \
+             patch("app.main.check_domain_age", new_callable=AsyncMock, return_value=_MOCK_DA), \
+             patch("app.main.check_ssl_certificate", new_callable=AsyncMock, return_value=_MOCK_SSL), \
+             patch("app.main.check_virustotal", new_callable=AsyncMock, return_value=_MOCK_VT), \
+             patch("app.main.check_ip_reputation", new_callable=AsyncMock, return_value=_MOCK_IP), \
+             patch("app.main.check_url_heuristics", new_callable=AsyncMock, return_value=_MOCK_HEU), \
+             patch("app.main.check_dnsbl", new_callable=AsyncMock, return_value=_MOCK_DNSBL), \
+             patch("app.main.check_openphish", new_callable=AsyncMock, return_value=_MOCK_OP), \
+             patch("app.main.take_screenshot", new_callable=AsyncMock, return_value=_MOCK_SS), \
+             patch("app.main._save_scan", new_callable=AsyncMock):
+            r_safe = client.post("/analyze", json={"url": "https://safe.example.com"})
+            r_evil = client.post("/analyze", json={"url": "https://evil.example.net"})
+
+        assert r_safe.status_code == 200
+        assert r_evil.status_code == 200
+
+        safe_data = r_safe.json()
+        evil_data = r_evil.json()
+        assert safe_data["checks"]["safe_browsing"]["flagged"] is False
+        assert evil_data["checks"]["safe_browsing"]["flagged"] is True
+        assert call_count["value"] == 2
+
+    def test_concurrent_analyze_same_url_deduplicates_via_cache(self):
+        """Sequential requests for the same URL hit the cache."""
+        sb_mock = AsyncMock(return_value=_MOCK_SB)
+        with patch("app.main._is_ssrf_safe", return_value=True), \
+             patch("app.main.check_safe_browsing", sb_mock), \
+             patch("app.main.check_domain_age", new_callable=AsyncMock, return_value=_MOCK_DA), \
+             patch("app.main.check_ssl_certificate", new_callable=AsyncMock, return_value=_MOCK_SSL), \
+             patch("app.main.check_virustotal", new_callable=AsyncMock, return_value=_MOCK_VT), \
+             patch("app.main.check_ip_reputation", new_callable=AsyncMock, return_value=_MOCK_IP), \
+             patch("app.main.check_url_heuristics", new_callable=AsyncMock, return_value=_MOCK_HEU), \
+             patch("app.main.check_dnsbl", new_callable=AsyncMock, return_value=_MOCK_DNSBL), \
+             patch("app.main.check_openphish", new_callable=AsyncMock, return_value=_MOCK_OP), \
+             patch("app.main.take_screenshot", new_callable=AsyncMock, return_value=_MOCK_SS), \
+             patch("app.main._save_scan", new_callable=AsyncMock):
+            r1 = client.post("/analyze", json={"url": "https://dedup.example.com"})
+            r2 = client.post("/analyze", json={"url": "https://dedup.example.com"})
+            r3 = client.post("/analyze", json={"url": "https://dedup.example.com"})
+
+        for r in (r1, r2, r3):
+            assert r.status_code == 200
+        assert sb_mock.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# DNS rebinding / SSRF edge cases
+# ---------------------------------------------------------------------------
+class TestDNSRebinding:
+    """Verify SSRF protection handles edge-case hostnames."""
+
+    def test_localhost_string_rejected(self):
+        response = client.post("/analyze", json={"url": "http://localhost/admin"})
+        assert response.status_code == 400
+
+    def test_ipv6_loopback_rejected(self):
+        response = client.post("/analyze", json={"url": "http://[::1]/admin"})
+        assert response.status_code == 400
+
+    def test_link_local_169_254_rejected(self):
+        response = client.post("/analyze", json={"url": "http://169.254.169.254/latest/meta-data/"})
+        assert response.status_code == 400
+
+    def test_zero_ip_rejected(self):
+        response = client.post("/analyze", json={"url": "http://0.0.0.0/"})
+        assert response.status_code == 400
+
+    def test_172_16_private_rejected(self):
+        response = client.post("/analyze", json={"url": "http://172.16.0.1/"})
+        assert response.status_code == 400
+
+    def test_ftp_scheme_rejected(self):
+        """Non-http(s) schemes should be rejected at validation level."""
+        response = client.post("/analyze", json={"url": "ftp://example.com/file"})
+        assert response.status_code == 422
+
+    def test_resolve_and_check_blocks_rebind_to_private(self):
+        """If DNS resolves to a private IP, the request should be blocked."""
+        with patch("app.main.socket.getaddrinfo", return_value=[
+            (2, 1, 6, '', ('127.0.0.1', 0)),
+        ]):
+            response = client.post("/analyze", json={"url": "https://rebind.attacker.com"})
+        assert response.status_code == 400
+        assert "private" in response.json()["detail"].lower()
+
+    def test_resolve_and_check_blocks_rebind_to_metadata_ip(self):
+        """Cloud metadata endpoint (169.254.169.254) should be blocked."""
+        with patch("app.main.socket.getaddrinfo", return_value=[
+            (2, 1, 6, '', ('169.254.169.254', 0)),
+        ]):
+            response = client.post("/analyze", json={"url": "https://sneaky.example.com"})
+        assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Shared report XSS prevention
+# ---------------------------------------------------------------------------
+class TestSharedReportXSS:
+    """Verify that malicious data stored via /analyze cannot inject XSS through /report."""
+
+    _XSS_URL = "https://example.com/<script>alert(1)</script>"
+    _XSS_CHECKS = {
+        "safe_browsing": _MOCK_SB,
+        "domain_age": _MOCK_DA,
+        "ssl_certificate": _MOCK_SSL,
+        "virustotal": _MOCK_VT,
+        "ip_reputation": _MOCK_IP,
+        "url_heuristics": _MOCK_HEU,
+        "dnsbl": _MOCK_DNSBL,
+        "openphish": _MOCK_OP,
+    }
+
+    def test_report_returns_json_content_type(self):
+        """Reports are served as JSON, not HTML — browsers won't execute scripts."""
+        stored = {
+            "id": 1,
+            "target_url": self._XSS_URL,
+            "timestamp": "2026-03-03T10:00:00Z",
+            "threat_score": 0,
+            "assessment": "Safe",
+            "checks": self._XSS_CHECKS,
+        }
+        with patch("app.main._load_report", new_callable=AsyncMock, return_value=stored):
+            response = client.get("/report/1")
+
+        assert response.status_code == 200
+        assert "application/json" in response.headers["content-type"]
+        data = response.json()
+        # The raw script tag should be in the JSON string, not interpreted
+        assert "<script>" in data["target_url"]
+
+    def test_xss_in_target_url_not_rendered_as_link(self):
+        """URLs with javascript: scheme are rejected at the analyze endpoint."""
+        response = client.post("/analyze", json={"url": "javascript:alert(1)"})
+        assert response.status_code == 422
+
+    def test_history_returns_json_not_html(self):
+        """History endpoint returns JSON, preventing XSS even with malicious stored URLs."""
+        _history_store.appendleft({
+            "id": 1,
+            "target_url": self._XSS_URL,
+            "timestamp": "2026-03-03T10:00:00Z",
+            "threat_score": 0,
+            "assessment": "Safe",
+            "checks": self._XSS_CHECKS,
+        })
+        response = client.get("/history")
+        assert response.status_code == 200
+        assert "application/json" in response.headers["content-type"]
+
+    def test_malicious_details_field_stays_in_json(self):
+        """Even if a check's details field contains HTML, the API returns JSON."""
+        xss_sb = {"flagged": True, "threat_type": "<img onerror=alert(1)>", "details": "<script>steal()</script>"}
+        stored = {
+            "id": 2,
+            "target_url": "https://example.com",
+            "timestamp": "2026-03-03T10:00:00Z",
+            "threat_score": 50,
+            "assessment": "Suspicious",
+            "checks": {**self._XSS_CHECKS, "safe_browsing": xss_sb},
+        }
+        with patch("app.main._load_report", new_callable=AsyncMock, return_value=stored):
+            response = client.get("/report/2")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["checks"]["safe_browsing"]["threat_type"] == "<img onerror=alert(1)>"
+        assert data["checks"]["safe_browsing"]["details"] == "<script>steal()</script>"

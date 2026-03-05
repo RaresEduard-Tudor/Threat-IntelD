@@ -1,7 +1,10 @@
 import base64
+import logging
 import os
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 _VT_URL_REPORT = "https://www.virustotal.com/api/v3/urls/{}"
 
@@ -56,6 +59,7 @@ async def check_virustotal(url: str) -> dict:
             "details": f"VirusTotal API error: {exc.response.status_code}.",
         }
     except Exception as exc:  # noqa: BLE001
+        logger.warning("VirusTotal check failed: %s", exc, exc_info=True)
         return {
             "detected": False,
             "malicious": 0,

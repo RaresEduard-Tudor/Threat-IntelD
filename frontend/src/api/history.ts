@@ -7,7 +7,8 @@ export async function fetchHistory(): Promise<HistoryEntry[]> {
     const response = await fetch(`${BASE_URL}/history`);
     if (!response.ok) return [];
     return response.json() as Promise<HistoryEntry[]>;
-  } catch {
+  } catch (err) {
+    console.warn('Failed to fetch scan history:', err);
     return [];
   }
 }

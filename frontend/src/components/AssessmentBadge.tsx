@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { Assessment } from '../types/threat';
 
 interface Props {
@@ -16,11 +17,11 @@ const icons: Record<Assessment, string> = {
   Malicious: '✕',
 };
 
-export default function AssessmentBadge({ assessment }: Props) {
+export default memo(function AssessmentBadge({ assessment }: Props) {
   return (
     <span className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-bold uppercase tracking-widest ${styles[assessment]}`}>
       <span>{icons[assessment]}</span>
       {assessment}
     </span>
   );
-}
+});

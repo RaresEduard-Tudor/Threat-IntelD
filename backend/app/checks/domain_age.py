@@ -1,8 +1,11 @@
 import asyncio
+import logging
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import whois
+
+logger = logging.getLogger(__name__)
 
 
 def _extract_domain(url: str) -> str:
@@ -23,6 +26,7 @@ def _get_domain_age_days(domain: str) -> int | None:
         delta = datetime.now(timezone.utc) - creation_date
         return delta.days
     except Exception:
+        logger.warning("WHOIS lookup failed for %s", domain, exc_info=True)
         return None
 
 

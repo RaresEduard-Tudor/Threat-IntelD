@@ -30,7 +30,9 @@ export default function UrlForm({ onSubmit, loading }: Props) {
   return (
     <form onSubmit={handleSubmit} className="w-full max-w-2xl mx-auto">
       <div className="flex flex-col sm:flex-row gap-3">
+        <label htmlFor="url-input" className="sr-only">URL to analyze</label>
         <input
+          id="url-input"
           type="text"
           value={value}
           onChange={(e) => setValue(e.target.value)}
@@ -42,6 +44,7 @@ export default function UrlForm({ onSubmit, loading }: Props) {
         />
         <button
           type="submit"
+          aria-label={loading ? 'Analyzing URL' : 'Analyze URL'}
           disabled={loading || !value.trim()}
           className="rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed
                      px-6 py-3 font-semibold text-white transition"

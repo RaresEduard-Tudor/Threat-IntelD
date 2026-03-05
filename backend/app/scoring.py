@@ -1,16 +1,24 @@
-# Threat Score Weights
-# safe_browsing flagged           → +50 points
-# domain_age High risk            → +30 points
-# domain_age Medium risk          → +15 points
-# ssl invalid                     → +20 points
-# ssl expiring < 14 days          → +10 points (only when cert is still valid)
-# virustotal malicious ≥3 engines → +40 points  (strong consensus)
-# virustotal malicious 1-2 engines→ +10 points  (low confidence / likely FP)
-# virustotal suspicious (>2)      → +15 points  (only when no malicious hits)
-# ip_reputation flagged           → +25 points
-# url_heuristics flag_count≥1     → +5 pts; ≥3 → +10 pts; ≥5 → +20 pts
-# openphish flagged               → +40 points
-# dnsbl flagged                   → +20 points
+# ---------------------------------------------------------------------------
+# Scoring weights (tune these to adjust sensitivity)
+# ---------------------------------------------------------------------------
+WEIGHT_SAFE_BROWSING = 50
+WEIGHT_DOMAIN_AGE_HIGH = 30
+WEIGHT_DOMAIN_AGE_MEDIUM = 15
+WEIGHT_SSL_INVALID = 20
+WEIGHT_SSL_EXPIRING = 10
+WEIGHT_VT_STRONG = 40          # ≥3 malicious engines (strong consensus)
+WEIGHT_VT_LOW = 10             # 1–2 malicious engines (weak signal / likely FP)
+WEIGHT_VT_SUSPICIOUS = 15      # suspicious-only, no malicious hits
+WEIGHT_IP_REPUTATION = 25
+WEIGHT_HEURISTICS_HIGH = 20    # ≥5 flags
+WEIGHT_HEURISTICS_MEDIUM = 10  # ≥3 flags
+WEIGHT_HEURISTICS_LOW = 5      # ≥1 flag
+WEIGHT_OPENPHISH = 40
+WEIGHT_DNSBL = 20
+
+THRESHOLD_MALICIOUS = 70
+THRESHOLD_SUSPICIOUS = 35
+
 
 def compute_score(
     safe_browsing: dict,
@@ -25,53 +33,53 @@ def compute_score(
     score = 0
 
     if safe_browsing.get("flagged"):
-        score += 50
+        score += WEIGHT_SAFE_BROWSING
 
     risk_level = domain_age.get("risk_level", "Low")
     if risk_level == "High":
-        score += 30
+        score += WEIGHT_DOMAIN_AGE_HIGH
     elif risk_level == "Medium":
-        score += 15
+        score += WEIGHT_DOMAIN_AGE_MEDIUM
 
     if not ssl.get("valid"):
-        score += 20
+        score += WEIGHT_SSL_INVALID
     else:
         expires_in_days = ssl.get("expires_in_days")
         if expires_in_days is not None and 0 <= expires_in_days < 14:
-            score += 10
+            score += WEIGHT_SSL_EXPIRING
 
     if virustotal is not None:
         malicious_count = virustotal.get("malicious", 0)
         if malicious_count >= 3:
-            score += 40  # strong consensus across engines
+            score += WEIGHT_VT_STRONG
         elif malicious_count >= 1:
-            score += 10  # 1-2 engines — low confidence, likely false positive
+            score += WEIGHT_VT_LOW
         elif virustotal.get("suspicious", 0) > 2:
-            score += 15
+            score += WEIGHT_VT_SUSPICIOUS
 
     if ip_reputation is not None and ip_reputation.get("is_flagged"):
-        score += 25
+        score += WEIGHT_IP_REPUTATION
 
     if url_heuristics is not None:
         flag_count = url_heuristics.get("flag_count", 0)
         if flag_count >= 5:
-            score += 20
+            score += WEIGHT_HEURISTICS_HIGH
         elif flag_count >= 3:
-            score += 10
+            score += WEIGHT_HEURISTICS_MEDIUM
         elif flag_count >= 1:
-            score += 5
+            score += WEIGHT_HEURISTICS_LOW
 
     if openphish is not None and openphish.get("flagged"):
-        score += 40
+        score += WEIGHT_OPENPHISH
 
     if dnsbl is not None and dnsbl.get("flagged"):
-        score += 20
+        score += WEIGHT_DNSBL
 
     score = min(score, 100)
 
-    if score >= 70:
+    if score >= THRESHOLD_MALICIOUS:
         assessment = "Malicious"
-    elif score >= 35:
+    elif score >= THRESHOLD_SUSPICIOUS:
         assessment = "Suspicious"
     else:
         assessment = "Safe"

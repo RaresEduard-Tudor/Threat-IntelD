@@ -2,6 +2,8 @@
 
 This document is the authoritative reference for anyone working on the codebase. It covers architecture, the full API contract, scoring logic, adding new checks, local development, deployment, and known limitations.
 
+> **No database by design** — Threat-IntelD is a stateless URL verification tool. There is no persistent database or user authentication; scan history (`deque(maxlen=50)`) and result caching (`TTLCache(500, 600s)`) live entirely in-memory. This keeps deployment simple and the attack surface small.
+
 ---
 
 ## Architecture
@@ -28,6 +30,10 @@ Threat-IntelD/
 │           ├── dnsbl.py           # DNS Blacklist (SpamCop — bl.spamcop.net only)
 │           ├── openphish.py       # OpenPhish public feed (in-memory 6-hour cache)
 │           └── screenshot.py      # Playwright full-page screenshot
+│   ├── tests/
+│       ├── conftest.py            # Shared fixtures (state + rate-limiter reset)
+│       ├── test_api.py            # API integration tests (35 tests)
+│       └── test_scoring.py        # Scoring unit tests (28 tests)
 └── frontend/
     ├── vercel.json                # Vercel deploy config + SPA rewrite rule
     └── src/
@@ -38,7 +44,9 @@ Threat-IntelD/
         │   ├── report.ts
         │   └── trending.ts
         ├── types/threat.ts        # TypeScript interfaces — keep in sync with backend
-        ├── utils/exportReport.ts
+        ├── utils/
+        │   ├── exportReport.ts     # JSON + HTML export with XSS escaping
+        │   └── exportReport.test.ts # XSS prevention tests (7 tests)
         └── components/
             ├── UrlForm.tsx            # Strips query params + fragments before submit
             ├── ResultsDashboard.tsx
@@ -154,8 +162,8 @@ Base URL (local dev): `http://localhost:8000`
 | Status | Body | Reason |
 | --- | --- | --- |
 | 400 | `{ "detail": "..." }` | Invalid URL, private address, or unsupported scheme |
-| 422 | FastAPI validation error | Missing / malformed request body |
-| 429 | `{ "detail": "Rate limit exceeded" }` | >10 requests/min from same IP |
+| 422 | FastAPI validation error | Missing / malformed request body, or non-HTTP(S) scheme |
+| 429 | `{ "detail": "Rate limit exceeded" }` | >10 requests/min on `/analyze`, >30/min on GET endpoints |
 
 ---
 
@@ -234,8 +242,9 @@ Checks that cannot run (missing API key or network error) contribute 0 points an
 
 - **Frontend (`UrlForm.tsx`):** query string and fragment are stripped from the URL before it is submitted (`parsed.search = ''; parsed.hash = '';`). Only scheme, host, and path are sent.
 - **Backend (`main.py`):** the canonical cache key is normalized to lowercase scheme + host with default ports stripped.
-- **SSRF guard:** private (RFC 1918), loopback (`127.x`, `::1`), and link-local addresses are rejected before any outbound HTTP call.
-- Only `http://` and `https://` schemes are accepted. Others (`ftp://`, `file://`, etc.) are rejected with 400.
+- **SSRF guard:** `_resolve_and_check()` uses `socket.getaddrinfo` to resolve the hostname before any outbound call, then checks the resolved IP against private (RFC 1918), loopback (`127.x`, `::1`), link-local, and cloud-metadata (`169.254.169.254`) ranges. This also prevents DNS rebinding attacks where a hostname initially resolves to a public IP but re-resolves to a private one.
+- Only `http://` and `https://` schemes are accepted. Others (`ftp://`, `file://`, `javascript:`, etc.) are rejected with 422.
+- **CORS:** restricted to `Content-Type` and `Accept` headers. The allowed origin is set via `ALLOWED_ORIGIN` env var.
 
 ---
 
@@ -319,7 +328,7 @@ Swagger UI is available at `http://localhost:8000/docs`.
 ## Testing
 
 ```bash
-# Backend unit + integration tests
+# Backend unit + integration tests (63 tests total)
 cd backend
 .venv/bin/python -m pytest tests/ -q
 
@@ -327,7 +336,7 @@ cd backend
 .venv/bin/python -m ruff check app/
 .venv/bin/python -m mypy app/ --ignore-missing-imports
 
-# Frontend tests
+# Frontend tests (26 tests total)
 cd frontend
 npm test -- --run
 ```

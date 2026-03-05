@@ -1,8 +1,11 @@
 import asyncio
+import logging
 import time
 from urllib.parse import urlparse, urlunparse
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 # Official public mirror — the openphish.com/feed.txt endpoint requires a paid
 # subscription and blocks automated requests.  The repo below is the authoritative
@@ -46,7 +49,7 @@ async def _refresh_if_needed() -> None:
             _feed = {line.strip() for line in resp.text.splitlines() if line.strip()}
             _last_refresh = time.time()
         except Exception:  # noqa: BLE001
-            pass  # keep stale feed; do not raise
+            logger.warning("Failed to refresh OpenPhish feed", exc_info=True)
 
 
 async def check_openphish(url: str) -> dict:

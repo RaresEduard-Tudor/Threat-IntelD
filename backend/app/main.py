@@ -3,6 +3,7 @@ import hashlib
 import ipaddress
 import itertools
 import json
+import logging
 import os
 import socket
 from collections import deque
@@ -15,7 +16,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, HttpUrl, field_validator
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -32,6 +33,7 @@ from .checks.dnsbl import check_dnsbl
 from .checks.openphish import check_openphish
 from .scoring import compute_score
 
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Lifespan
@@ -67,7 +69,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
     allow_methods=["POST", "GET", "OPTIONS"],
-    allow_headers=["*"],
+    allow_headers=["Content-Type", "Accept"],
 )
 
 # ---------------------------------------------------------------------------
@@ -86,6 +88,7 @@ _id_counter = itertools.count(1)
 # ---------------------------------------------------------------------------
 @app.exception_handler(Exception)
 async def _global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.error("Unhandled exception on %s %s: %s", request.method, request.url.path, exc, exc_info=True)
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 # ---------------------------------------------------------------------------
@@ -104,18 +107,28 @@ _PRIVATE_NETS = (
 )
 
 
+def _resolve_and_check(hostname: str) -> list[str] | None:
+    """Resolve *hostname* and return its IP strings, or None if any is private."""
+    try:
+        infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        ips: list[str] = list({info[4][0] for info in infos})
+        for raw in ips:
+            ip = ipaddress.ip_address(raw)
+            if any(ip in net for net in _PRIVATE_NETS):
+                return None
+        return ips
+    except (socket.gaierror, ValueError):
+        return None
+
+
 def _is_ssrf_safe(url: str) -> bool:
     """Return False if the URL's host resolves to a private or reserved address."""
     hostname = urlparse(url).hostname
     if not hostname:
         return False
-    try:
-        resolved = socket.gethostbyname(hostname)
-        ip = ipaddress.ip_address(resolved)
-        return not any(ip in net for net in _PRIVATE_NETS)
-    except (socket.gaierror, ValueError):
-        # Unresolvable host — let downstream checks handle the failure gracefully
-        return True
+    result = _resolve_and_check(hostname)
+    # None means unresolvable or private — reject to be safe
+    return result is not None
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +136,13 @@ def _is_ssrf_safe(url: str) -> bool:
 # ---------------------------------------------------------------------------
 class AnalyzeRequest(BaseModel):
     url: HttpUrl
+
+    @field_validator("url")
+    @classmethod
+    def must_be_http_scheme(cls, v: HttpUrl) -> HttpUrl:
+        if urlparse(str(v)).scheme.lower() not in ("http", "https"):
+            raise ValueError("Only http and https URLs are accepted.")
+        return v
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +166,8 @@ def _canonical_url(url: str) -> str:
         else:
             netloc = host
         path = p.path.rstrip("/") or "/"
-        return urlunparse((scheme, netloc, path, p.params, p.query, ""))
+        sorted_query = "&".join(sorted(p.query.split("&"))) if p.query else ""
+        return urlunparse((scheme, netloc, path, p.params, sorted_query, ""))
     except Exception:
         return url
 
@@ -259,18 +280,21 @@ async def health():
 
 
 @app.get("/history")
-async def get_history():
+@limiter.limit("30/minute")
+async def get_history(request: Request):
     return await _load_history()
 
 
 @app.get("/trending")
-async def get_trending():
+@limiter.limit("30/minute")
+async def get_trending(request: Request):
     """Return the most recent malicious/suspicious scans for the public feed."""
     return await _load_trending()
 
 
 @app.get("/report/{report_id}")
-async def get_report(report_id: int):
+@limiter.limit("30/minute")
+async def get_report(request: Request, report_id: int):
     """Return a full stored scan result by its database ID."""
     data = await _load_report(report_id)
     if data is None:

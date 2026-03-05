@@ -1,5 +1,10 @@
 import asyncio
 import base64
+import logging
+
+logger = logging.getLogger(__name__)
+
+_MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024  # 5 MB
 
 
 async def take_screenshot(url: str) -> dict:
@@ -17,8 +22,6 @@ async def take_screenshot(url: str) -> dict:
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
                     "--disable-gpu",
                 ],
@@ -27,13 +30,19 @@ async def take_screenshot(url: str) -> dict:
                 context = await browser.new_context(
                     viewport={"width": 1280, "height": 800},
                     ignore_https_errors=True,
+                    java_script_enabled=False,
                 )
                 page = await context.new_page()
                 await page.goto(url, wait_until="domcontentloaded", timeout=12_000)
-                await asyncio.sleep(0.8)  # let JS settle briefly
                 img_bytes = await page.screenshot(
                     type="jpeg", quality=75, full_page=False
                 )
+                if len(img_bytes) > _MAX_SCREENSHOT_BYTES:
+                    return {
+                        "available": False,
+                        "image_b64": None,
+                        "details": "Screenshot too large.",
+                    }
             finally:
                 await browser.close()
 
@@ -43,6 +52,7 @@ async def take_screenshot(url: str) -> dict:
             "details": "Screenshot captured successfully.",
         }
     except Exception as exc:  # noqa: BLE001
+        logger.warning("Screenshot capture failed: %s", exc, exc_info=True)
         return {
             "available": False,
             "image_b64": None,

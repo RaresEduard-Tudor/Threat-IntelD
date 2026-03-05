@@ -20,6 +20,9 @@ async def check_dnsbl(url: str) -> dict:
     except OSError:
         return {"flagged": False, "listed_in": [], "details": "Could not resolve hostname for DNSBL lookup."}
 
+    if ":" in ip:
+        return {"flagged": False, "listed_in": [], "details": f"IPv6 address ({ip}) — DNSBL lookup not supported."}
+
     reversed_ip = ".".join(reversed(ip.split(".")))
     listed_in: list[str] = []
 

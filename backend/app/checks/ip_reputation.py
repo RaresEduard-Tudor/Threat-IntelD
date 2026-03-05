@@ -1,8 +1,11 @@
+import logging
 import os
 import socket
 from urllib.parse import urlparse
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 _ABUSEIPDB_URL = "https://api.abuseipdb.com/api/v2/check"
 
@@ -70,6 +73,7 @@ async def check_ip_reputation(url: str) -> dict:
             "details": f"AbuseIPDB API error: {exc.response.status_code}.",
         }
     except Exception as exc:  # noqa: BLE001
+        logger.warning("AbuseIPDB check failed for %s: %s", ip, exc, exc_info=True)
         return {
             "ip": ip,
             "abuse_confidence_score": 0,

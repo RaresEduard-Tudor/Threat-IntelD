@@ -29,11 +29,14 @@ _SUSPICIOUS_TLDS = {
     ".buzz", ".icu", ".pw", ".rest", ".cyou", ".cam", ".surf", ".monster",
 }
 
-_SUSPICIOUS_PATH = re.compile(r"(/wp-login|/admin|%[0-9a-fA-F]{2}.*%[0-9a-fA-F]{2})", re.IGNORECASE)
+_SUSPICIOUS_PATH = re.compile(r"(/wp-login|/admin|%[0-9a-fA-F]{2}[^%]*%[0-9a-fA-F]{2})", re.IGNORECASE)
+
+_MAX_URL_LEN = 2048
 
 
 async def check_url_heuristics(url: str) -> dict:
     """Heuristic scan — instant, no I/O. Async so it composes with asyncio.gather."""
+    url = url[:_MAX_URL_LEN]
     parsed = urlparse(url)
     hostname = (parsed.hostname or "").lower()
     flags: list[str] = []

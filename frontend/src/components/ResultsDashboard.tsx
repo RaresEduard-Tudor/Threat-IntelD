@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ThreatReport } from '../types/threat';
 import AssessmentBadge from './AssessmentBadge';
 import ThreatScoreDonut from './ThreatScoreDonut';
@@ -13,6 +13,11 @@ interface Props {
 export default function ResultsDashboard({ report, reportId }: Props) {
   const { target_url, timestamp, threat_score, assessment, checks } = report;
   const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => () => clearTimeout(copyTimer.current), []);
+
+  const safeHref = /^https?:\/\//i.test(target_url) ? target_url : undefined;
 
   function handleShare() {
     if (reportId == null) return;
@@ -21,7 +26,8 @@ export default function ResultsDashboard({ report, reportId }: Props) {
     url.searchParams.set('id', String(reportId));
     navigator.clipboard.writeText(url.toString()).then(() => {
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(false), 2000);
     });
   }
 
@@ -34,14 +40,18 @@ export default function ResultsDashboard({ report, reportId }: Props) {
           <AssessmentBadge assessment={assessment} />
           <p className="text-sm text-gray-400 break-all">
             <span className="text-gray-500">Target: </span>
-            <a
-              href={target_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-400 hover:underline"
-            >
-              {target_url}
-            </a>
+            {safeHref ? (
+              <a
+                href={safeHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-400 hover:underline"
+              >
+                {target_url}
+              </a>
+            ) : (
+              <span className="text-blue-400">{target_url}</span>
+            )}
           </p>
           <p className="text-xs text-gray-600">
             Analyzed at {new Date(timestamp).toLocaleString()}
@@ -49,6 +59,7 @@ export default function ResultsDashboard({ report, reportId }: Props) {
           {reportId != null && (
             <button
               onClick={handleShare}
+              aria-label="Copy shareable link"
               className="mt-1 self-start text-xs text-blue-500 hover:text-blue-400 transition-colors"
             >
               {copied ? '✅ Link copied!' : '🔗 Copy shareable link'}
@@ -57,12 +68,14 @@ export default function ResultsDashboard({ report, reportId }: Props) {
           <div className="flex gap-2 mt-1">
             <button
               onClick={() => exportJson(report)}
+              aria-label="Download JSON report"
               className="text-xs text-gray-400 hover:text-gray-200 border border-gray-700 rounded px-2 py-1 transition-colors"
             >
               ⬇ JSON
             </button>
             <button
               onClick={() => exportHtml(report)}
+              aria-label="Download HTML report"
               className="text-xs text-gray-400 hover:text-gray-200 border border-gray-700 rounded px-2 py-1 transition-colors"
             >
               🖨 HTML

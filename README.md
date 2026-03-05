@@ -27,11 +27,13 @@ A self-hosted threat intelligence dashboard that analyzes any URL for malware, p
 - **Threat score 0–100** with three tiers: `Safe` (0–34) · `Suspicious` (35–69) · `Malicious` (70–100)
 - All checks run **concurrently** via `asyncio.gather` with per-check timeouts (12 s)
 - **Query param stripping** — submitted URLs have query strings and fragments removed before analysis
-- **Scan history** — last 50 results stored in-memory, surfaced in a history panel
+- **No database by design** — Threat-IntelD is a stateless URL verification tool, not a data storage platform. There is no user authentication or persistent database; scan history and result caching live entirely in-memory. This keeps deployment simple and the attack surface small.
+- **Scan history** — last 50 results stored in-memory, surfaced in a history panel (resets on restart)
 - **Result caching** — repeated scans for the same URL return instantly (10-minute TTL)
 - **Input sanitization** — cache key is normalized (lowercase scheme/host, stripped default ports)
-- **Rate limiting** — 10 requests/minute per IP (slowapi)
-- **SSRF protection** — private/loopback/link-local addresses are rejected before any outbound call
+- **Rate limiting** — 10 requests/minute per IP on `/analyze`, 30/minute on GET endpoints (slowapi)
+- **SSRF protection** — DNS-resolution-based guard rejects private, loopback, link-local, and cloud-metadata addresses; blocks DNS rebinding attacks
+- **Restricted CORS** — only `Content-Type` and `Accept` headers allowed
 - Page screenshot preview via Playwright
 - Shareable report permalinks (`?id=N`) and JSON/HTML export
 - Fully dark-themed responsive UI
@@ -100,6 +102,7 @@ npm run dev
 
 ```json
 {
+  "id": 1,
   "target_url": "https://example.com",
   "timestamp": "2026-03-05T12:00:00Z",
   "threat_score": 0,
@@ -152,8 +155,9 @@ Threat-IntelD/
 │   │       ├── openphish.py       # OpenPhish public feed (6-hour cache)
 │   │       └── screenshot.py      # Playwright page screenshot
 │   ├── tests/
-│   │   ├── test_api.py        # API integration tests
-│   │   └── test_scoring.py    # Scoring unit tests
+│   │   ├── conftest.py        # Shared fixtures (state reset, rate-limiter reset)
+│   │   ├── test_api.py        # API integration tests (35 tests)
+│   │   └── test_scoring.py    # Scoring unit tests (28 tests)
 │   ├── .env.example
 │   ├── Dockerfile
 │   ├── run.py
@@ -168,7 +172,9 @@ Threat-IntelD/
 │       │   ├── report.ts
 │       │   └── trending.ts
 │       ├── types/threat.ts         # TypeScript interfaces matching backend response
-│       ├── utils/exportReport.ts   # JSON + HTML export
+│       ├── utils/
+│       │   ├── exportReport.ts      # JSON + HTML export
+│       │   └── exportReport.test.ts # XSS prevention tests (7 tests)
 │       └── components/
 │           ├── UrlForm.tsx
 │           ├── ResultsDashboard.tsx
@@ -226,14 +232,14 @@ See `backend/.env.example` for a ready-to-copy template.
 ## Testing
 
 ```bash
-# Backend
+# Backend (63 tests)
 cd backend && .venv/bin/python -m pytest tests/ -q
 
 # Lint + types
 .venv/bin/python -m ruff check app/
 .venv/bin/python -m mypy app/ --ignore-missing-imports
 
-# Frontend
+# Frontend (26 tests)
 cd frontend && npm test -- --run
 ```
 

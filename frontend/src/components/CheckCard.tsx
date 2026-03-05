@@ -1,3 +1,5 @@
+import { memo } from 'react';
+
 interface CheckCardProps {
   title: string;
   icon: string;
@@ -7,7 +9,7 @@ interface CheckCardProps {
   meta?: { label: string; value: string | number | null }[];
 }
 
-export default function CheckCard({ title, icon, passed, skipped, details, meta }: CheckCardProps) {
+export default memo(function CheckCard({ title, icon, passed, skipped, details, meta }: CheckCardProps) {
   const borderColor = skipped ? 'border-gray-700' : passed ? 'border-green-800' : 'border-red-800';
   const iconBg = skipped ? 'bg-gray-800 text-gray-500' : passed ? 'bg-green-900/50 text-green-400' : 'bg-red-900/50 text-red-400';
   const statusText = skipped ? 'SKIPPED' : passed ? 'PASSED' : 'FAILED';
@@ -39,4 +41,4 @@ export default function CheckCard({ title, icon, passed, skipped, details, meta 
       )}
     </div>
   );
-}
+});

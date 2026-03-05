@@ -68,8 +68,11 @@ export default function HistoryPanel({ entries, loading, onSelect }: Props) {
             {entries.map((entry, i) => (
               <tr
                 key={entry.id}
+                role="button"
+                tabIndex={0}
                 className={`border-b border-gray-800/50 last:border-0 hover:bg-gray-800/40 cursor-pointer transition-colors ${i % 2 === 0 ? '' : 'bg-gray-900/60'}`}
                 onClick={() => onSelect(entry.url)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(entry.url); } }}
                 title={`Re-analyse ${entry.url}`}
               >
                 <td className="px-4 py-3 text-gray-300 max-w-xs">

@@ -26,6 +26,15 @@ function slugify(url: string): string {
   return url.replace(/https?:\/\//, '').replace(/[^a-zA-Z0-9]/g, '-').slice(0, 60);
 }
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function scoreColor(score: number): string {
   if (score >= 70) return '#ef4444';
   if (score >= 35) return '#eab308';
@@ -35,8 +44,8 @@ function scoreColor(score: number): string {
 function checkRow(label: string, passed: boolean, detail: string): string {
   return `
     <tr>
-      <td style="padding:8px 12px;border-bottom:1px solid #1f2937;">${passed ? '✅' : '❌'} <strong>${label}</strong></td>
-      <td style="padding:8px 12px;border-bottom:1px solid #1f2937;color:#9ca3af;">${detail}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #1f2937;">${passed ? '✅' : '❌'} <strong>${escapeHtml(label)}</strong></td>
+      <td style="padding:8px 12px;border-bottom:1px solid #1f2937;color:#9ca3af;">${escapeHtml(detail)}</td>
     </tr>`;
 }
 
@@ -46,7 +55,7 @@ function buildHtml(r: ThreatReport): string {
   const ts = new Date(r.timestamp).toLocaleString();
 
   const heuristicFlags = checks.url_heuristics.flags.length > 0
-    ? `<ul style="margin:4px 0 0 16px;padding:0;color:#9ca3af;font-size:13px;">${checks.url_heuristics.flags.map(f => `<li>${f}</li>`).join('')}</ul>`
+    ? `<ul style="margin:4px 0 0 16px;padding:0;color:#9ca3af;font-size:13px;">${checks.url_heuristics.flags.map(f => `<li>${escapeHtml(f)}</li>`).join('')}</ul>`
     : '';
 
   const screenshotHtml = r.screenshot?.available && r.screenshot.image_b64
@@ -57,7 +66,7 @@ function buildHtml(r: ThreatReport): string {
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Threat Report — ${r.target_url}</title>
+  <title>Threat Report — ${escapeHtml(r.target_url)}</title>
   <style>
     body { font-family: system-ui, sans-serif; background: #030712; color: #f9fafb; margin: 0; padding: 32px; }
     h1 { font-size: 1.5rem; margin-bottom: 4px; }
@@ -72,8 +81,8 @@ function buildHtml(r: ThreatReport): string {
 </head>
 <body>
   <h1>🔍 ThreatIntelD Report</h1>
-  <div class="url"><a href="${r.target_url}" style="color:#60a5fa;">${r.target_url}</a></div>
-  <div class="meta">Analyzed at ${ts} &mdash; Assessment: <strong style="color:${color}">${r.assessment}</strong></div>
+  <div class="url"><a href="${escapeHtml(r.target_url)}" style="color:#60a5fa;">${escapeHtml(r.target_url)}</a></div>
+  <div class="meta">Analyzed at ${escapeHtml(ts)} &mdash; Assessment: <strong style="color:${color}">${escapeHtml(r.assessment)}</strong></div>
   <div class="score">${r.threat_score}<span style="font-size:1.2rem;font-weight:400;color:#6b7280;">/100</span></div>
   <table>
     <thead><tr><th>Check</th><th>Details</th></tr></thead>
