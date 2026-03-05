@@ -1,322 +1,388 @@
 # Threat-IntelD — Developer Guidelines
 
-This document is the single source of truth for architecture decisions, coding conventions, and
-operational procedures for the Threat-IntelD project.
+This document is the authoritative reference for anyone working on the codebase. It covers architecture, the full API contract, scoring logic, adding new checks, local development, deployment, and known limitations.
 
 ---
 
-## Architecture Overview
+## Architecture
 
 ```
-backend/
-├── render.yaml
-├── requirements.txt
-├── run.py
-└── app/
-    ├── __init__.py
-    ├── main.py          # FastAPI app, routes, in-memory history
-    ├── scoring.py       # Threat-score computation (all weights live here)
-    └── checks/
-        ├── __init__.py
-        ├── domain_age.py       # WHOIS domain age check
-        ├── dnsbl.py            # DNS Blacklist (Spamhaus ZEN, SpamCop)
-        ├── ip_reputation.py    # AbuseIPDB reputation check
-        ├── openphish.py        # OpenPhish phishing feed check
-        ├── safe_browsing.py    # Google Safe Browsing v4
-        ├── ssl_certificate.py  # TLS cert validity + expiry check
-        ├── url_heuristics.py   # Lexical / structural URL signals
-        └── virustotal.py       # VirusTotal URL scan (70+ AV engines)
-
-frontend/
-├── index.html
-├── package.json
-├── tailwind.config.js
-├── vite.config.ts
-└── src/
-    ├── App.tsx
-    ├── main.tsx
-    ├── index.css
-    ├── api/
-    │   └── analyze.ts          # fetch wrapper for /analyze
-    ├── components/
-    │   ├── AssessmentBadge.tsx
-    │   ├── CheckCard.tsx
-    │   ├── ResultsDashboard.tsx
-    │   ├── ThreatScoreDonut.tsx
-    │   └── UrlForm.tsx
-    ├── types/
-    │   └── threat.ts           # mirrors backend response shape exactly
-    └── utils/
-        └── exportReport.ts     # JSON + HTML report export
+Threat-IntelD/
+├── render.yaml                    # Render Blueprint (repo root — required for Render auto-deploy)
+├── docker-compose.yml             # Local full-stack orchestration
+├── backend/
+│   ├── Dockerfile                 # Python 3.13-slim; shell-form CMD honours $PORT
+│   ├── run.py                     # Uvicorn entry point (local dev)
+│   ├── requirements.txt
+│   ├── .env.example
+│   └── app/
+│       ├── main.py                # FastAPI app: routes, in-memory history, canonical cache, rate-limit, SSRF guard
+│       ├── scoring.py             # Weighted threat score 0-100 + assessment label
+│       └── checks/
+│           ├── safe_browsing.py   # Google Safe Browsing v4
+│           ├── domain_age.py      # WHOIS registration date
+│           ├── ssl_certificate.py # Direct TLS handshake + expiry countdown
+│           ├── virustotal.py      # VirusTotal v3 URL scan
+│           ├── ip_reputation.py   # AbuseIPDB v2
+│           ├── url_heuristics.py  # Local regex/pattern analysis
+│           ├── dnsbl.py           # DNS Blacklist (SpamCop — bl.spamcop.net only)
+│           ├── openphish.py       # OpenPhish public feed (in-memory 6-hour cache)
+│           └── screenshot.py      # Playwright full-page screenshot
+└── frontend/
+    ├── vercel.json                # Vercel deploy config + SPA rewrite rule
+    └── src/
+        ├── App.tsx
+        ├── api/
+        │   ├── analyze.ts
+        │   ├── history.ts
+        │   ├── report.ts
+        │   └── trending.ts
+        ├── types/threat.ts        # TypeScript interfaces — keep in sync with backend
+        ├── utils/exportReport.ts
+        └── components/
+            ├── UrlForm.tsx            # Strips query params + fragments before submit
+            ├── ResultsDashboard.tsx
+            ├── ThreatScoreDonut.tsx
+            ├── AssessmentBadge.tsx
+            └── CheckCard.tsx
 ```
 
-### Request lifecycle
+---
+
+## Request Lifecycle
 
 ```
-Browser → POST /analyze
-            └─ _canonical_url()       # normalize, strip fragment/default ports
-            └─ in-memory cache check  # skip duplicate work within TTL
-            └─ asyncio.gather(8 checks)
-                  ├── safe_browsing.py
-                  ├── domain_age.py
-                  ├── ssl_certificate.py
-                  ├── virustotal.py
-                  ├── ip_reputation.py
-                  ├── url_heuristics.py
-                  ├── dnsbl.py
-                  └── openphish.py
-            └─ scoring.py → (score 0-100, assessment label)
-            └─ _save_scan()            # appendleft() into deque(maxlen=50)
-            └─ JSON response
+User types URL
+  └─▶ UrlForm.tsx          strips query string + fragment; submits cleaned URL
+        └─▶ POST /analyze   SSRF guard · rate-limit · canonical cache lookup
+              └─▶ asyncio.gather  (all 8 checks with 12 s per-check timeout)
+                    └─▶ scoring.py  returns threat_score + assessment
+                          └─▶ stored in deque(maxlen=50) + canonical cache (TTL 10 min)
+                                └─▶ JSON response → ResultsDashboard.tsx
 ```
-
-### Scan history
-
-Scan results are stored in a **module-level `deque(maxlen=50)`** in `main.py`. This means:
-- The 50 most recent scans are kept in RAM.
-- History resets on every process restart (by design — no persistence required).
-- IDs are generated by `itertools.count(1)` and also reset on restart.
-- Multi-instance deployments will have independent histories (acceptable for demo/personal use).
 
 ---
 
 ## API Contract
 
+Base URL (local dev): `http://localhost:8000`
+
+### `GET /health`
+
+```json
+{ "status": "ok" }
+```
+
+---
+
 ### `POST /analyze`
 
 **Request body**
+
 ```json
 { "url": "https://example.com" }
 ```
 
 **Response (200)**
+
 ```json
 {
-  "id": 1,
-  "url": "https://example.com",
-  "score": 0,
+  "id": 42,
+  "target_url": "https://example.com",
+  "timestamp": "2026-03-05T12:00:00Z",
+  "threat_score": 0,
   "assessment": "Safe",
   "checks": {
-    "safe_browsing":  { "safe": true,    "details": "..." },
-    "domain_age":     { "age_days": 9876, "suspicious": false, "details": "..." },
-    "ssl":            { "valid": true,   "expires_in_days": 200, "details": "..." },
-    "virustotal":     { "detected": false, "suspicious_count": 0, "details": "...", "scan_url": "..." },
-    "ip_reputation":  { "flagged": false, "abuse_score": 0, "ip": "93.184.216.34", "details": "..." },
-    "url_heuristics": { "suspicious": false, "signals": [], "details": "..." },
-    "dnsbl":          { "flagged": false, "listed_in": [], "details": "..." },
-    "openphish":      { "flagged": false, "details": "..." }
+    "safe_browsing": {
+      "flagged": false,
+      "threat_type": null,
+      "details": "No threats detected."
+    },
+    "domain_age": {
+      "days_registered": 4521,
+      "risk_level": "Low",
+      "details": "Established domain."
+    },
+    "ssl_certificate": {
+      "valid": true,
+      "issuer": "Let's Encrypt",
+      "expires_in_days": 72,
+      "details": "Valid. Expires in 72 days."
+    },
+    "virustotal": {
+      "detected": false,
+      "malicious": 0,
+      "suspicious": 0,
+      "total": 95,
+      "details": "0/95 engines flagged."
+    },
+    "ip_reputation": {
+      "ip": "93.184.216.34",
+      "abuse_confidence_score": 0,
+      "is_flagged": false,
+      "country_code": "US",
+      "total_reports": 0,
+      "details": "No abuse reports."
+    },
+    "url_heuristics": {
+      "is_suspicious": false,
+      "flag_count": 0,
+      "flags": [],
+      "risk_score": 0,
+      "details": "No suspicious patterns detected."
+    },
+    "dnsbl": {
+      "flagged": false,
+      "listed_in": [],
+      "details": "Not listed in any DNS blocklist."
+    },
+    "openphish": {
+      "flagged": false,
+      "details": "Not found in OpenPhish feed."
+    }
   },
-  "screenshot_url": null,
-  "cached": false,
-  "scanned_at": "2025-01-01T00:00:00Z"
+  "screenshot": {
+    "available": true,
+    "image_b64": "<base64>",
+    "details": "Screenshot captured."
+  }
 }
 ```
 
-### `GET /history?limit=10`
+**Error responses**
 
-Returns the last *N* scans (max 50, default 10) from the in-memory store.
+| Status | Body | Reason |
+| --- | --- | --- |
+| 400 | `{ "detail": "..." }` | Invalid URL, private address, or unsupported scheme |
+| 422 | FastAPI validation error | Missing / malformed request body |
+| 429 | `{ "detail": "Rate limit exceeded" }` | >10 requests/min from same IP |
+
+---
+
+### `GET /history`
+
+Returns the 20 most recent scans (newest first). No query parameters.
+
+```json
+[
+  { "id": 42, "target_url": "...", "timestamp": "...", "threat_score": 0, "assessment": "Safe" },
+  ...
+]
+```
+
+---
 
 ### `GET /report/{id}`
 
-Returns the stored scan result for the given ID (404 if not found or history was cleared).
+Returns the full stored result for the given scan ID (same shape as `POST /analyze`).
+
+```json
+{ "id": 42, "target_url": "...", "threat_score": 0, "assessment": "Safe", "checks": { ... } }
+```
+
+---
 
 ### `GET /trending`
 
-Returns up to 10 URLs that were scanned more than once, ordered by scan count descending.
+Returns the 20 most recent `Malicious` or `Suspicious` scans (summary only, newest first).
+
+```json
+[
+  { "id": 7, "target_url": "...", "timestamp": "...", "threat_score": 75, "assessment": "Malicious" },
+  ...
+]
+```
 
 ---
 
 ## Assessment Thresholds
 
-| Score range | Label       | Badge colour |
-|-------------|-------------|--------------|
-| 0–24        | Safe        | green        |
-| 25–49       | Suspicious  | yellow       |
-| 50–74       | Dangerous   | orange       |
-| 75–100      | Critical    | red          |
+| Range | Label | Meaning |
+| --- | --- | --- |
+| 0 – 34 | `Safe` | No significant signals detected |
+| 35 – 69 | `Suspicious` | Some signals warrant caution |
+| 70 – 100 | `Malicious` | Strong consensus from multiple checks |
 
 ---
 
 ## Scoring Weights
 
-All scoring logic lives exclusively in `scoring.py`. Weights (additive, capped at 100):
+The full logic lives in `backend/app/scoring.py`.
 
-| Signal                          | Points |
-|---------------------------------|--------|
-| Google Safe Browsing hit        | +50    |
-| VirusTotal detected             | +40    |
-| OpenPhish feed match            | +40    |
-| Domain age < 30 days            | +30    |
-| IP flagged by AbuseIPDB         | +25    |
-| VirusTotal suspicious count > 2 | +15    |
-| Domain age 30–90 days           | +15    |
-| SSL certificate invalid         | +20    |
-| DNSBL listed                    | +20    |
-| SSL expiry < 14 days            | +10    |
+| Check | Condition | Points |
+| --- | --- | --- |
+| Safe Browsing | Flagged | +50 |
+| OpenPhish | Flagged (phishing feed match) | +40 |
+| VirusTotal | ≥3 engines malicious | +40 |
+| Domain Age | High risk (<30 days) | +30 |
+| IP Reputation | Flagged by AbuseIPDB | +25 |
+| SSL | Invalid certificate | +20 |
+| DNSBL | Listed in SpamCop | +20 |
+| Domain Age | Medium risk (<180 days) | +15 |
+| VirusTotal | >2 engines suspicious (no malicious hits) | +15 |
+| SSL | Expiring within 14 days | +10 |
+| VirusTotal | 1–2 engines malicious (low confidence) | +10 |
+| URL Heuristics | ≥5 flags | +20 |
+| URL Heuristics | ≥3 flags | +10 |
+| URL Heuristics | ≥1 flag | +5 |
 
-**Total is capped at 100.**
+Checks that cannot run (missing API key or network error) contribute 0 points and return a `details` string explaining why.
 
 ---
 
 ## Input Sanitisation
 
-`main.py` runs every submitted URL through `_canonical_url()` before caching or dispatching checks:
-
-- Lowercases scheme and hostname.
-- Strips the URL fragment (`#...`).
-- Removes default ports (`:80` for `http`, `:443` for `https`).
-- Reassembles the URL with `urllib.parse.urlunparse`.
-
-This prevents cache misses for semantically identical URLs and provides a small layer of normalisation
-before passing the value to external APIs.
-
-**SSRF note:** Checks should not follow user-supplied redirects to RFC-1918 / loopback addresses.
-The current checks use `httpx` with `follow_redirects=False` (or short timeouts) to limit exposure.
+- **Frontend (`UrlForm.tsx`):** query string and fragment are stripped from the URL before it is submitted (`parsed.search = ''; parsed.hash = '';`). Only scheme, host, and path are sent.
+- **Backend (`main.py`):** the canonical cache key is normalized to lowercase scheme + host with default ports stripped.
+- **SSRF guard:** private (RFC 1918), loopback (`127.x`, `::1`), and link-local addresses are rejected before any outbound HTTP call.
+- Only `http://` and `https://` schemes are accepted. Others (`ftp://`, `file://`, etc.) are rejected with 400.
 
 ---
 
 ## Adding a New Check
 
-1. Create `backend/app/checks/<name>.py` with an `async def check_<name>(url: str) -> dict` function.
-2. Return a plain `dict` with a consistent shape (include a human-readable `"details"` string).
-3. Import and call the function in `main.py`'s `_run_checks()` coroutine; add it to the 8-tuple return.
-4. Add scoring logic in `scoring.py`'s `compute_score()` (accept the new arg with `= None`).
-5. Add the TypeScript interface in `frontend/src/types/threat.ts`.
-6. Add a `<CheckCard>` entry in `frontend/src/components/ResultsDashboard.tsx`.
-7. Add an export row in `frontend/src/utils/exportReport.ts`.
-8. Add a `_MOCK_<NAME>` fixture in `backend/tests/test_api.py` and patch the new check in each test.
-9. Update `frontend/src/components/ResultsDashboard.test.tsx` to include the new check's title.
+1. Create `backend/app/checks/my_check.py`:
+
+```python
+import httpx
+
+async def run(url: str) -> dict:
+    """
+    Returns a dict that always includes a `details: str` key.
+    On error, return a safe default dict with an explanatory `details` string.
+    Never raise — callers don't catch individual check exceptions.
+    """
+    try:
+        ...
+        return {"flagged": False, "details": "..."}
+    except Exception as exc:
+        return {"flagged": False, "details": f"Check failed: {exc}"}
+```
+
+2. Import and call it in `main.py` alongside the other checks inside `asyncio.gather(...)`.
+
+3. Add a scoring branch in `scoring.py`.
+
+4. Add the TypeScript type to `frontend/src/types/threat.ts`.
+
+5. Optionally add a `CheckCard` variant in `frontend/src/components/CheckCard.tsx`.
+
+6. Write a unit test in `backend/tests/`.
 
 ---
 
 ## Environment Variables
 
-| Variable                       | Required | Description                                           |
-|-------------------------------|----------|-------------------------------------------------------|
-| `GOOGLE_SAFE_BROWSING_API_KEY` | Yes      | Google Safe Browsing v4 API key                       |
-| `VIRUSTOTAL_API_KEY`           | Yes      | VirusTotal public API key (4 req/min on free tier)    |
-| `ABUSEIPDB_API_KEY`            | Yes      | AbuseIPDB API key (free tier available)               |
-| `SCREENSHOT_API_URL`           | No       | Base URL for the Playwright screenshot service        |
-| `ALLOWED_ORIGIN`               | No       | Production frontend URL (restricts CORS in prod)      |
+| Variable | Service | Required | Description |
+| --- | --- | --- | --- |
+| `GOOGLE_SAFE_BROWSING_API_KEY` | Backend | No | Google Safe Browsing v4. Check skipped if absent. |
+| `VIRUSTOTAL_API_KEY` | Backend | No | VirusTotal v3. Check skipped if absent. |
+| `ABUSEIPDB_API_KEY` | Backend | No | AbuseIPDB v2. Check skipped if absent. |
+| `ALLOWED_ORIGIN` | Backend | No | Frontend origin for CORS. Defaults to `*` in dev. |
+| `VITE_API_URL` | Frontend | Yes (prod) | Full base URL of the backend API (no trailing slash). |
 
-Set these in a `backend/.env` file locally; in Render's environment variable dashboard for production.
+Copy `backend/.env.example` to `backend/.env` and populate for local development.
 
 ---
 
 ## Local Development
 
-### Backend
+### Full stack via Docker Compose
 
 ```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # fill in API keys
-uvicorn app.main:app --reload
-```
-
-API is available at `http://localhost:8000`. Interactive docs at `/docs`.
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-App is available at `http://localhost:5173`.
-
-### Docker
-
-```bash
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env  # VITE_API_URL=http://localhost:8000
 docker compose up --build
 ```
 
-Both services start together; frontend proxies `/api/*` to the backend container.
+### Without Docker
+
+```bash
+# Terminal 1 — backend
+cd backend
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+python run.py            # http://localhost:8000
+
+# Terminal 2 — frontend
+cd frontend
+npm install
+cp .env.example .env     # VITE_API_URL=http://localhost:8000
+npm run dev              # http://localhost:5173
+```
+
+Swagger UI is available at `http://localhost:8000/docs`.
 
 ---
 
 ## Testing
 
 ```bash
-# Backend (from repo root)
-cd backend && source .venv/bin/activate
-pytest tests/ -v
+# Backend unit + integration tests
+cd backend
+.venv/bin/python -m pytest tests/ -q
+
+# Linting + type checking
+.venv/bin/python -m ruff check app/
+.venv/bin/python -m mypy app/ --ignore-missing-imports
+
+# Frontend tests
+cd frontend
+npm test -- --run
 ```
 
-21 backend tests covering:
-- `/analyze` happy path (all 8 mocked checks)
-- In-memory caching (second identical URL returns `"cached": true`)
-- `/history` endpoint
-- `/report/{id}` found + not-found cases
-- `/trending` endpoint
-- `compute_score` unit tests for each signal
-- Individual check module unit tests
-
-```bash
-# Frontend
-cd frontend && npm test
-```
-
-TypeScript must compile clean (`tsc --noEmit`) before every commit.
+CI (GitHub Actions) runs all of the above on every push.
 
 ---
 
 ## Deployment
 
-| Service | Target   | Config file            |
-|---------|----------|------------------------|
-| Render  | Backend  | `backend/render.yaml`  |
-| Vercel  | Frontend | `frontend/vercel.json` |
+### Backend — Render (Docker)
 
-**Render** — Python 3.13 web service, build `pip install -r requirements.txt`,
-start `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
-Set all required API keys in Render's environment variable dashboard.
+`render.yaml` at the **repo root** is a [Render Blueprint](https://render.com/docs/blueprint-spec).
 
-**Vercel** — update `VITE_API_URL` in `frontend/vercel.json` (or the Vercel dashboard) to the
-actual Render service URL before deploying.
+To deploy:
+1. Render dashboard → **New** → **Blueprint** → connect the GitHub repo
+2. Confirm the `threat-inteld-backend` service preview
+3. Fill in the three API key env vars (`GOOGLE_SAFE_BROWSING_API_KEY`, `VIRUSTOTAL_API_KEY`, `ABUSEIPDB_API_KEY`) when prompted
+4. Click **Apply**
 
-**IMPORTANT:** `allow_origins=["*"]` in `main.py` must be restricted to the production frontend
-domain before public deployment. Set `ALLOWED_ORIGIN` and update the `CORSMiddleware` call.
+Key `render.yaml` fields:
+
+```yaml
+runtime: docker
+rootDir: backend      # Render builds backend/Dockerfile from this directory
+envVars:
+  - ALLOWED_ORIGIN: https://threat-inteld.vercel.app
+```
+
+The `Dockerfile` uses a shell-form `CMD` so Render's injected `$PORT` is honoured:
+
+```dockerfile
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+```
+
+### Frontend — Vercel
+
+```bash
+npm install -g vercel
+cd frontend
+vercel login
+vercel --prod --yes
+vercel env add VITE_API_URL production   # paste Render service URL
+vercel --prod --yes                       # redeploy to pick up the env var
+```
+
+`frontend/vercel.json` sets the build command, output directory, and SPA rewrite rule. The `VITE_API_URL` is managed in the Vercel dashboard — do **not** commit it to `vercel.json`.
 
 ---
 
 ## Known Limitations
 
-- **In-memory history resets on restart.** This is intentional — no persistence is needed for
-  personal/demo use. If persistence is required, replace the `deque` with a SQLite/PostgreSQL
-  store via SQLAlchemy async.
-- **OpenPhish feed has a 6-hour cache lag.** Zero-day phishing URLs may not appear for up to 6 hours
-  after they are added to the feed. Cache TTL is configurable in `checks/openphish.py`.
-- **Google Safe Browsing only catches known-bad URLs.** Zero-day phishing pages not yet indexed by
-  Google are not detected by this signal.
-- **`python-whois` is synchronous and can be slow** (2–5 s) for some TLDs. The
-  `asyncio.to_thread()` wrapper prevents blocking the event loop but still adds latency.
-- **SSL check connects directly to port 443.** HTTP-only URLs are scored as invalid SSL by design.
-- **CORS is currently open (`*`)** — must be locked before any public deployment.
-- **No authentication** — the API is fully public, suitable for personal/demo use only.
-
----
-
-## Coding Conventions
-
-### Backend (Python)
-
-- Python 3.13, type hints required on all public functions.
-- Each check returns a plain `dict` — do **not** use Pydantic models inside check modules.
-- Use `httpx.AsyncClient` for all outbound HTTP requests; never `requests`.
-- Use `asyncio.to_thread()` for synchronous blocking calls (e.g. `socket.gethostbyname`,
-  `python-whois`). Do not use `loop.run_in_executor`.
-- Never log raw URLs at INFO level in production (PII consideration).
-- Scoring lives exclusively in `scoring.py` — keep business logic out of `main.py`.
-- Each check module must be independently testable with no FastAPI imports.
-
-### Frontend (TypeScript / React)
-
-- Every component is a named default export from its own file.
-- Props interfaces are defined inline in the same file as the component.
-- Backend response shape is mirrored exactly in `types/threat.ts` — keep in sync when changing the API.
-- Tailwind only — no additional CSS files except `index.css` (globals/reset).
-- No global state library while the app is single-page; use local `useState` and prop drilling.
+- **DNSBL coverage is minimal** — only SpamCop (`bl.spamcop.net`) is queried. Spamhaus public lists were removed because ZEN's PBL caused false positives for legitimate CDN IPs (e.g. YouTube, Cloudflare), and `sbl-xbl.spamhaus.org` no longer exists. Additional reputable public DNSBL feeds could be added in `dnsbl.py`.
+- **WHOIS reliability** — `python-whois` occasionally fails to parse certain TLD responses. When parsing fails the domain age check returns `"Unknown"` and contributes 0 points.
+- **VirusTotal rate limit** — free tier: 4 requests/minute. Under load the check will time out; the timeout is caught and contributes 0 points.
+- **OpenPhish feed latency** — the public feed is fetched and cached in-memory for 6 hours. First load after a cold start can take 0–2 s.
+- **Render free plan cold starts** — the backend may have a ~30 s startup delay after inactivity.
+- **History is in-memory** — the last 50 scans are stored in a `deque`. Restarting the server clears history. A persistent store could be added behind the existing `history` interface in `main.py`.

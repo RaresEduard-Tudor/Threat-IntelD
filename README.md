@@ -2,8 +2,9 @@
 
 A self-hosted threat intelligence dashboard that analyzes any URL for malware, phishing, domain age risk, SSL issues, DNS blacklisting, and more — returning a weighted threat score and per-check breakdown.
 
+**Live:** https://threat-inteld.vercel.app  
 **Stack:** FastAPI (Python 3.13) · React 18 + TypeScript 5.5 · Vite 5 · Tailwind CSS 3  
-**Deploy:** Render (backend) · Vercel (frontend) · Docker Compose for local dev  
+**Deploy:** Render (backend, Docker) · Vercel (frontend) · Docker Compose for local dev  
 **CI:** GitHub Actions — ruff · mypy · pytest · tsc · vitest
 
 ---
@@ -13,18 +14,19 @@ A self-hosted threat intelligence dashboard that analyzes any URL for malware, p
 | Check | Data Source | Score Weight |
 | --- | --- | --- |
 | Malware / phishing detection | Google Safe Browsing v4 | +50 if flagged |
-| Multi-engine AV scan | VirusTotal v3 (70+ engines) | +40 detected / +15 if >2 suspicious |
+| Multi-engine AV scan | VirusTotal v3 (95+ engines) | +40 if ≥3 engines / +10 if 1–2 engines / +15 if >2 suspicious |
 | Domain age risk | WHOIS lookup | +30 High (<30 days) / +15 Medium (<180 days) |
 | SSL certificate validity + expiry | Direct TLS handshake | +20 invalid / +10 expiring <14 days |
-| IP reputation | AbuseIPDB v2 | +20 if flagged |
-| URL heuristics | Local pattern analysis | +4 per suspicious flag (max +20) |
-| DNS blacklist | Spamhaus ZEN + SpamCop | +20 if listed |
+| IP reputation | AbuseIPDB v2 | +25 if flagged |
+| URL heuristics | Local pattern analysis | +5 / +10 / +20 by flag count |
+| DNS blacklist | SpamCop | +20 if listed |
 | Phishing feed | OpenPhish public feed | +40 if matched |
 
-> Checks marked with an API key are gracefully **skipped** (score contribution = 0) if the key is not configured.
+> All checks with an API key are gracefully **skipped** (score contribution = 0) if the key is not configured.
 
 - **Threat score 0–100** with three tiers: `Safe` (0–34) · `Suspicious` (35–69) · `Malicious` (70–100)
 - All checks run **concurrently** via `asyncio.gather` with per-check timeouts (12 s)
+- **Query param stripping** — submitted URLs have query strings and fragments removed before analysis
 - **Scan history** — last 50 results stored in-memory, surfaced in a history panel
 - **Result caching** — repeated scans for the same URL return instantly (10-minute TTL)
 - **Input sanitization** — cache key is normalized (lowercase scheme/host, stripped default ports)
@@ -99,14 +101,14 @@ npm run dev
 ```json
 {
   "target_url": "https://example.com",
-  "timestamp": "2026-03-03T12:00:00Z",
+  "timestamp": "2026-03-05T12:00:00Z",
   "threat_score": 0,
   "assessment": "Safe",
   "checks": {
     "safe_browsing":   { "flagged": false, "threat_type": null, "details": "No threats detected." },
     "domain_age":      { "days_registered": 4521, "risk_level": "Low", "details": "Established domain." },
     "ssl_certificate": { "valid": true, "issuer": "Let's Encrypt", "expires_in_days": 72, "details": "Valid." },
-    "virustotal":      { "detected": false, "malicious": 0, "suspicious": 0, "total": 88, "details": "0/88 engines flagged." },
+    "virustotal":      { "detected": false, "malicious": 0, "suspicious": 0, "total": 95, "details": "0/95 engines flagged." },
     "ip_reputation":   { "ip": "93.184.216.34", "abuse_confidence_score": 0, "is_flagged": false, "country_code": "US", "total_reports": 0, "details": "No abuse reports." },
     "url_heuristics":  { "is_suspicious": false, "flag_count": 0, "flags": [], "risk_score": 0, "details": "No suspicious patterns." },
     "dnsbl":           { "flagged": false, "listed_in": [], "details": "Not listed in any DNS blocklist." },
@@ -134,6 +136,7 @@ Returns the 20 most recent `Malicious` or `Suspicious` scans.
 
 ```
 Threat-IntelD/
+├── render.yaml                # Render Blueprint — one-click backend deploy
 ├── backend/
 │   ├── app/
 │   │   ├── main.py            # FastAPI app, routes, in-memory history, caching
@@ -145,7 +148,7 @@ Threat-IntelD/
 │   │       ├── virustotal.py      # VirusTotal v3 URL scan
 │   │       ├── ip_reputation.py   # AbuseIPDB v2
 │   │       ├── url_heuristics.py  # Local pattern analysis
-│   │       ├── dnsbl.py           # Spamhaus ZEN + SpamCop DNS queries
+│   │       ├── dnsbl.py           # SpamCop DNS queries
 │   │       ├── openphish.py       # OpenPhish public feed (6-hour cache)
 │   │       └── screenshot.py      # Playwright page screenshot
 │   ├── tests/
@@ -153,13 +156,17 @@ Threat-IntelD/
 │   │   └── test_scoring.py    # Scoring unit tests
 │   ├── .env.example
 │   ├── Dockerfile
-│   ├── render.yaml
 │   ├── run.py
 │   └── requirements.txt
 ├── frontend/
+│   ├── vercel.json            # Vercel deploy config + SPA rewrite rule
 │   └── src/
 │       ├── App.tsx
-│       ├── api/analyze.ts
+│       ├── api/
+│       │   ├── analyze.ts
+│       │   ├── history.ts
+│       │   ├── report.ts
+│       │   └── trending.ts
 │       ├── types/threat.ts         # TypeScript interfaces matching backend response
 │       ├── utils/exportReport.ts   # JSON + HTML export
 │       └── components/
@@ -169,28 +176,36 @@ Threat-IntelD/
 │           ├── AssessmentBadge.tsx
 │           └── CheckCard.tsx
 ├── .github/workflows/ci.yml
-├── docker-compose.yml
-└── guidelines.md
+└── docker-compose.yml
 ```
 
 ---
 
 ## Deployment
 
-### Backend — Render
+### Backend — Render (Docker)
 
-1. Create a **Web Service** on [render.com](https://render.com) pointing at `backend/`.
-2. Runtime: **Python 3.13**
-3. Build command: `pip install -r requirements.txt`
-4. Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-5. Set environment variables in the dashboard (see table below).
+The `render.yaml` at the repo root is a [Render Blueprint](https://render.com/docs/blueprint-spec). To deploy:
 
-### Frontend — Vercel
+1. Go to [render.com](https://render.com) → **New** → **Blueprint** → connect the repo
+2. Render reads `render.yaml` and previews the `threat-inteld-backend` service
+3. Fill in the three API key env vars when prompted, then click **Apply**
+4. Build takes ~2 min; the service URL will be `https://threat-inteld.onrender.com`
 
-1. Import the repository on [vercel.com](https://vercel.com).
-2. Set **Root Directory** to `frontend/`.
-3. Set the `VITE_API_URL` environment variable to your Render service URL.
-4. Deploy — Vercel auto-detects Vite.
+> First request after inactivity has a ~30 s cold start on the free plan.
+
+### Frontend — Vercel CLI
+
+```bash
+npm install -g vercel
+cd frontend
+vercel login        # opens browser for OAuth
+vercel --prod --yes # creates project + deploys
+vercel env add VITE_API_URL production  # paste your Render URL when prompted
+vercel --prod --yes # redeploy to pick up the env var
+```
+
+The `vercel.json` already sets the build command, output directory, and SPA rewrite rule.
 
 ---
 
@@ -201,7 +216,7 @@ Threat-IntelD/
 | `GOOGLE_SAFE_BROWSING_API_KEY` | Backend | Google Safe Browsing v4 key. Omit to skip the check. |
 | `VIRUSTOTAL_API_KEY` | Backend | VirusTotal v3 key. Omit to skip the check. |
 | `ABUSEIPDB_API_KEY` | Backend | AbuseIPDB v2 key. Omit to skip the check. |
-| `ALLOWED_ORIGIN` | Backend | Frontend origin for CORS (e.g. `https://your-app.vercel.app`). Defaults to `*`. |
+| `ALLOWED_ORIGIN` | Backend | Frontend origin for CORS (e.g. `https://threat-inteld.vercel.app`). Defaults to `*`. |
 | `VITE_API_URL` | Frontend | Full base URL of the backend (no trailing slash). |
 
 See `backend/.env.example` for a ready-to-copy template.
